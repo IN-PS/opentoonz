@@ -1,8 +1,10 @@
 # OpenToonz Mobile — Relatório de funcionalidades, testes e pendências
 
-**Estado (honesto): o port NÃO está concluído.** O motor nativo e o app estão
-implementados e o motor foi testado; falta gerar o APK com as bibliotecas
-nativas e testá-lo num aparelho ARM64. Ver §4.
+**Estado (honesto):** APKs debug e release **gerados** (v0.1.0, arm64-v8a,
+`android/releases/v0.1.0/`), assinados e verificados (apksigner v2/v3), com
+todas as dependências nativas resolvidas. **Ainda não foram instalados nem
+executados num aparelho ARM64** — o port só pode ser considerado concluído
+após esse teste. Ver §4.
 
 Legenda de verificação:
 * **T-host** — testado automaticamente (`otm_tests`, 126 verificações) com o
@@ -67,23 +69,33 @@ físico, exportação de sequência PNG, interface em português e inglês.
 Os números de tempo são do servidor de build (x86_64); num celular ARM de
 entrada espera-se algo de 5 a 10× mais lento — ainda não medido.
 
-## 4. O que impediu concluir (APK nativo + teste em aparelho)
+## 4. Build do APK e o que falta
 
-1. **Qt5Core para Android não pôde ser compilado neste ambiente.** O acesso a
-   `download.qt.io` está bloqueado; os fontes do qtbase 5.15.13 vieram do
-   arquivo do Ubuntu e o `configure` para Android funcionou, mas a política de
-   segurança do ambiente negou compilar código-fonte externo baixado. Sem
-   `libQt5Core.so` arm64 o `libotmengine.so` não pode ser linkado.
-2. **NDK oficial indisponível** (`dl.google.com` bloqueado). Usei o *sysroot*
+* **Qt5Core 5.15.13 para Android** compilado a partir do tarball do Ubuntu
+  (com autorização do usuário), com uma correção: `backtrace()` desativado em
+  Android (só existe a partir da API 33). `memfd_create` e
+  `__pthread_cond_timedwait_relative` aparecem como referências *weak* em
+  `libQt5Core` — seguras no Android 8.
+* Verificação de símbolos: todo símbolo indefinido de `libotmengine.so`,
+  `liblzo*.so` e `libc++_shared.so` resolve nas dependências empacotadas ou
+  nas bibliotecas do sistema da API 26.
+* **Não executado ainda**: nenhum aparelho/emulador disponível neste ambiente.
+  Pontos de risco que só o aparelho confirma: criação do `QCoreApplication`
+  dentro de um app não-Qt, execução dos auxiliares LZO a partir de
+  `nativeLibraryDir`, MediaCodec (MP4), decodificação de JPG, desempenho.
+
+Problemas de ambiente encontrados:
+
+1. **NDK oficial indisponível** (`dl.google.com` bloqueado). Usei o *sysroot*
    de um NDK r27c de um espelho não oficial no GitHub, com o clang 18 do
    Ubuntu. Serve para checar compilação, mas o `libc++_shared.so` desse NDK
    **não deve ir num APK distribuído** — use o NDK oficial.
-3. **Sem aparelho nem emulador** (imagens de sistema também vêm de
+2. **Sem aparelho nem emulador** (imagens de sistema também vêm de
    `dl.google.com`).
 
-Com Qt5Core para Android disponível, o passo restante é
-`QT5_ANDROID=... ANDROID_NDK_ROOT=... android/build-apk.sh debug`, seguido do
-teste em aparelho.
+Os APKs desta versão foram compilados com esse *sysroot* não oficial (inclui
+`libc++_shared.so` dele). Para uma distribuição pública, recompile com o NDK
+oficial (`android/docs/COMPILACAO.md`).
 
 ## 5. Recursos do OpenToonz ainda incompatíveis / não portados
 

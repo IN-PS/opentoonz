@@ -4,10 +4,10 @@ Port do OpenToonz para Android (arm64-v8a, Android 8.0+). O núcleo C++ do
 OpenToonz (tnzcore, toonzlib, codec TLV) é compilado sem fork; a interface de
 desktop Qt é substituída por uma interface touch nativa.
 
-**Estado:** motor nativo implementado e testado no host (126/126
-verificações) e compilando para arm64; app Android implementado e
-empacotável. **Ainda falta** linkar com Qt5Core para Android, gerar o APK com
-as bibliotecas nativas e testar num aparelho — ver `docs/RELATORIO.md` §4.
+**Estado:** motor nativo testado no host (126/126 verificações); APKs
+v0.1.0 debug e release gerados para arm64-v8a em
+[`releases/v0.1.0/`](releases/v0.1.0/). **Ainda não testados num aparelho** —
+ver `docs/RELATORIO.md` §4.
 
 | Documento | Conteúdo |
 |---|---|

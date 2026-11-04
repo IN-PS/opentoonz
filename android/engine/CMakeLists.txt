@@ -265,6 +265,12 @@ if(OTM_BUILD_JNI)
   target_link_libraries(otmengine PRIVATE otm_core)
   if(ANDROID)
     target_link_libraries(otmengine PRIVATE jnigraphics log android)
+    # QtAndroidPrivate::initJNI (qjnihelpers_p.h)
+    target_include_directories(otmengine PRIVATE ${Qt5Core_PRIVATE_INCLUDE_DIRS})
+    # Qt5AndroidSupport.cmake renames outputs (lib<name>_<abi>.so in
+    # android-build/); the app loads plain libotmengine.so
+    set_target_properties(otmengine PROPERTIES SUFFIX ".so"
+      LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
     target_link_options(otmengine PRIVATE -Wl,--gc-sections -Wl,-z,max-page-size=16384)
   else()
     target_include_directories(otmengine PRIVATE ${JNI_INCLUDE_DIRS})

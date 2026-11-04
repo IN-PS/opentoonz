@@ -31,8 +31,10 @@ export ANDROID_NDK_ROOT=/caminho/android-ndk-r27c
 export ANDROID_SDK_ROOT=/usr/lib/android-sdk
 android/tools/build-qt5-android.sh qtbase-everywhere-src-5.15.13 $HOME/qt5-android
 ```
-O `configure` usado (sem GUI, sem widgets, sem rede) foi validado; os passos
-`make` são os padrões do qmake (ver nota no script).
+Usado para gerar os APKs v0.1.0. O script aplica a correção de `backtrace()`
+(indisponível antes da API 33) e copia o `moc` do host para `bin/`. Se o
+`find_package(Qt5)` reclamar de `rcc`, copie também o `rcc` do host para
+`$QT5_ANDROID/bin/`.
 
 Alternativa: usar o Qt 5.15 para Android do instalador oficial da Qt
 (diretório `android/` ou `android_arm64_v8a/`), passando esse prefixo em

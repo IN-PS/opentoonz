@@ -43,3 +43,5 @@ ipch/
 /stuff/config/loc
 # OpenToonz Mobile build outputs
 android/out/
+!android/build-apk.sh
+!android/tools/build-qt5-android.sh
