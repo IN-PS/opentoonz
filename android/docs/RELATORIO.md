@@ -1,7 +1,7 @@
 # OpenToonz Mobile — Relatório de funcionalidades, testes e pendências
 
-**Estado (honesto):** APKs debug e release **gerados** (v0.1.0, arm64-v8a,
-`android/releases/v0.1.0/`), assinados e verificados (apksigner v2/v3), com
+**Estado (honesto):** APKs debug e release **gerados** (v0.1.1, testes do app na JVM 6/6; v0.1.0 substituída, arm64-v8a,
+`android/releases/v0.1.1/`, publicados em GitHub Releases), assinados e verificados (apksigner v2/v3), com
 todas as dependências nativas resolvidas. **Ainda não foram instalados nem
 executados num aparelho ARM64** — o port só pode ser considerado concluído
 após esse teste. Ver §4.
@@ -49,6 +49,29 @@ físico, exportação de sequência PNG, interface em português e inglês.
 | Zoom e movimentação | pinça com 2 dedos (zoom 0,05×–40×) e arraste; com caneta, 1 dedo também move |
 | Caneta digital | pressão (`getPressure`), `TOOL_TYPE_STYLUS/ERASER`, cursor em *hover*, rejeição de palma (após detectar caneta, dedos só navegam) |
 | Horizontal e vertical | `configChanges` tratados; layout em blocos que se adapta às duas orientações |
+
+## 3a. Testes do app na JVM (Robolectric) — v0.1.1
+
+`android/hosttest/run-tests.sh` executa o **app real** (Activities, Views,
+diálogos, seletor de arquivos, ciclo de vida) com Robolectric 3.8 / Android
+8.1 (API 27), ligado ao **motor nativo real** por JNI. Resultado: **6/6**
+(`docs/evidencias/robolectric_app_tests.log`):
+
+| Teste | Cobre |
+|---|---|
+| t1 | gerenciador de projetos: diálogo "Novo projeto", arquivos criados, cartão na lista |
+| t2 | toques no canvas → pincel; novo quadro; onion skin (pixel #FFAFAF); hold; camadas (adicionar/ocultar); preenchimento; desfazer/refazer; seleção mover+aplicar; play; salvar pelo menu (2 TLV); reabrir: 0 pixels diferentes |
+| t3 | salvamento automático ao pausar a Activity |
+| t4 | importar imagem pelo seletor do sistema → camada raster; exportar GIF e sequência PNG |
+| t5 | mudança de configuração para retrato sem recriar a Activity; desenho continua funcionando |
+| t6 | pressão: traço de 1 px (pressão 0,1) a 31 px (pressão 1,0). O tipo de ferramenta "caneta" não é simulável no Robolectric 3.8 |
+
+Bug encontrado e corrigido por esses testes: o arraste de uma seleção ignorava
+a posição em que o dedo era levantado.
+
+Limites desta simulação: renderização gráfica, MediaCodec (MP4), decodificação
+JPG/PNG e entrada de caneta são simulados pelo Robolectric; o código nativo
+roda em x86_64, não em ARM64.
 
 ## 3. Testes executados
 

@@ -401,6 +401,8 @@ public class CanvasView extends View {
     }
 
     private void onUp(MotionEvent e) {
+        // the release position is the final position of a selection drag
+        if (mState == SEL_MOVE) onMove(e);
         float[] p = toDoc(e.getX(), e.getY());
         boolean tap = Math.hypot(e.getX() - mDownX, e.getY() - mDownY) <= mSlop * 2;
         switch (mState) {

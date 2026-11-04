@@ -1,0 +1,28 @@
+    [app-test] project created: /tmp/robolectric-Method_t1_projectManagerCreatesProject2364561830296466371/org.opentoonz.mobile-dataDir/files/projects/Test One files=[levels, project.otm, palette.tpl, thumbnail.png]
+AppFlowTest > t1_projectManagerCreatesProject PASSED
+    [app-test] canvas view 846x378, document 960x540
+    [app-test] brush stroke OK
+    [app-test] frame 2 drawn; timeline frames=2
+    [app-test] onion pixel = #FFFFAFAF
+    [app-test] layers OK
+    [app-test] fill pixel = #FF2878DC
+    [app-test] fill + undo/redo OK
+    [app-test] after move: (250,120)=#FFFFFFFF (450,120)=#FFE62828 (450,130)=#FFE62828
+    [app-test] selection move OK
+    [app-test] playback OK, current row 2
+    [app-test] saved levels: [Layer_2_2.tpl, Layer_2_2.tlv, Layer_1_1.tpl, Layer_1_1.tlv]
+    [app-test] reopen: differing pixels = 0
+AppFlowTest > t2_drawFramesOnionLayersFillUndoSelectPlaySaveReopen PASSED
+    [app-test] autosave on pause OK
+AppFlowTest > t3_autosaveOnPause PASSED
+    [app-test] import flow OK (raster layer added)
+    [app-test] GIF exported: 6331 bytes (ImportExport.gif)
+    [app-test] PNG sequence: [ImportExport.0001.png, ImportExport.0002.png]
+    [app-test] MP4 on JVM: encoder produced a file
+AppFlowTest > t4_importAndExport PASSED
+    [app-test] portrait: drawing still works, canvas 846x378
+AppFlowTest > t5_rotationKeepsWorking PASSED
+    [app-test] stylus tool type visible to the UI under Robolectric 3.8: false (legacy MotionEvent shadow drops toolType; UI stylus path needs a device)
+    [app-test] stylus: line width at low pressure=1px, high pressure=31px
+AppFlowTest > t6_stylusPressure PASSED
+BUILD SUCCESSFUL in 22s

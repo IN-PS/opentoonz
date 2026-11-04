@@ -1,5 +1,7 @@
 # OpenToonz Mobile v0.1.0 (pré-lançamento, não testado em aparelho)
 
+> **Substituída pela v0.1.1** (correção no arraste da seleção).
+
 | Arquivo | Uso |
 |---|---|
 | `OpenToonzMobile-0.1.0-release.apk` | versão otimizada, assinada com a chave de release do projeto |

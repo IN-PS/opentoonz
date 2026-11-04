@@ -47,3 +47,4 @@ android/out/
 !android/tools/build-qt5-android.sh
 android/hosttest/build/
 android/hosttest/.gradle/
+!android/hosttest/build.gradle
