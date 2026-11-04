@@ -23,11 +23,17 @@
 #include "trastercm.h"
 #include "tropcm.h"
 
+#ifdef OTM_NO_PREFERENCES
+// OpenToonz Mobile: no Preferences singleton; use the desktop defaults.
+#define DEF_REGION_WITH_PAINT true
+#define USE_PREVAILING_REFER_FILL false
+#else
 #include "preferences.h"
 #define DEF_REGION_WITH_PAINT                                                  \
   Preferences::instance()->getBoolValue(PreferencesItemId::DefRegionWithPaint)
 #define USE_PREVAILING_REFER_FILL                                              \
   Preferences::instance()->getBoolValue(PreferencesItemId::ReferFillPrevailing)
+#endif
 
 class TPalette;
 

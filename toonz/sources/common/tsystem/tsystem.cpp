@@ -25,8 +25,14 @@
 #include <QCoreApplication>
 #include <QUuid>
 #include <QRegularExpression>
+#ifndef OTM_NO_QTGUI
 #include <QDesktopServices>
+#endif
+#ifdef OTM_NO_QTGUI
+#include <QSysInfo>
+#else
 #include <QHostInfo>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -154,7 +160,13 @@ void TSystem::hasMainLoop(bool state) {
 
 //-----------------------------------------------------------------------------------
 
-QString TSystem::getHostName() { return QHostInfo::localHostName(); }
+QString TSystem::getHostName() {
+#ifdef OTM_NO_QTGUI
+  return QSysInfo::machineHostName();
+#else
+  return QHostInfo::localHostName();
+#endif
+}
 
 //------------------------------------------------------------
 
@@ -1157,6 +1169,11 @@ bool TSystem::showDocument(const TFilePath &path) {
   }
   return true;
 #else
+#ifdef OTM_NO_QTGUI
+  // OpenToonz Mobile: documents are opened by the Android UI layer.
+  qWarning("Can't open document: %s", toQString(path).toUtf8().constData());
+  return false;
+#else
   // Use QDesktopServices for cross-platform support
   QUrl url = QUrl::fromLocalFile(toQString(path));
   if (!QDesktopServices::openUrl(url)) {
@@ -1164,6 +1181,7 @@ bool TSystem::showDocument(const TFilePath &path) {
     return false;
   }
   return true;
+#endif  // OTM_NO_QTGUI
 #endif
 }
 

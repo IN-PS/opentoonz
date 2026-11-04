@@ -6,7 +6,11 @@
 // #include "tgeometry.h"
 #include "tmachine.h"
 
-#ifdef _WIN32
+#if defined(OTM_GL_STUB)
+// OpenToonz Mobile: no desktop OpenGL on Android. Rendering is done on the
+// CPU; the legacy GL entry points used by tnzcore resolve to no-op stubs.
+#include "otm_glstub.h"
+#elif defined(_WIN32)
 #include <windows.h>
 #include <cstdlib>
 
@@ -15,13 +19,13 @@
 #include <GL/glut.h>
 #endif
 
-#ifdef MACOSX
+#if defined(MACOSX) && !defined(OTM_GL_STUB)
 #include <GLUT/glut.h>
 #define GLUT_NO_LIB_PRAGMA
 #define GLUT_NO_WARNING_DISABLE
 #endif
 
-#if defined(LINUX) || defined(FREEBSD) || defined(HAIKU)
+#if (defined(LINUX) || defined(FREEBSD) || defined(HAIKU)) && !defined(OTM_GL_STUB)
 #include <GL/gl.h>
 #include <GL/glu.h>
 #include <GL/glut.h>

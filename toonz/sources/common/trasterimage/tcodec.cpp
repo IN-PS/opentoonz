@@ -569,7 +569,18 @@ void TRasterCodecLz4::decompress(const TRasterP &compressedRas,
 
 namespace {
 
+#ifdef OTM_LZO_ENV
+// OpenToonz Mobile: the lzo helper executables are shipped inside the APK
+// native library directory; their paths are given by the host application.
+QString otmLzoExe(const char *var) {
+  return QString::fromLocal8Bit(qgetenv(var));
+}
+#endif
+
 bool lzoCompress(const QByteArray src, QByteArray &dst) {
+#ifdef OTM_LZO_ENV
+  QString compressExe = otmLzoExe("OTM_LZOCOMPRESS");
+#else
 #ifdef _WIN32
   QDir exeDir;
   if (QCoreApplication::applicationName() == "ToonzPreview") {
@@ -582,6 +593,7 @@ bool lzoCompress(const QByteArray src, QByteArray &dst) {
 #endif  // _WIN32
 
   QString compressExe = exeDir.filePath("lzocompress");
+#endif  // OTM_LZO_ENV
   QProcess process;
   process.start(compressExe, QStringList() << QString::number(src.size()));
   if (!process.waitForStarted()) return false;
@@ -592,6 +604,9 @@ bool lzoCompress(const QByteArray src, QByteArray &dst) {
 }
 
 bool lzoDecompress(const QByteArray src, int dstSize, QByteArray &dst) {
+#ifdef OTM_LZO_ENV
+  QString decompressExe = otmLzoExe("OTM_LZODECOMPRESS");
+#else
 #ifdef _WIN32
   QDir exeDir;
   if (QCoreApplication::applicationName() == "ToonzPreview") {
@@ -604,6 +619,7 @@ bool lzoDecompress(const QByteArray src, int dstSize, QByteArray &dst) {
   QDir exeDir(QCoreApplication::applicationDirPath());
 #endif  // _WIN32
   QString decompressExe = exeDir.filePath("lzodecompress");
+#endif  // OTM_LZO_ENV
   QProcess process;
   process.start(decompressExe, QStringList() << QString::number(dstSize)
                                              << QString::number(src.size()));
