@@ -32,7 +32,20 @@ public class CanvasView extends View {
     }
 
     private static final int NONE = 0, DRAW_PENDING = 1, DRAWING = 2, NAVIGATE = 3,
-            SELECT_RECT = 4, SEL_MOVE = 5, SEL_GESTURE = 6;
+            SELECT_RECT = 4, SEL_MOVE = 5, SEL_GESTURE = 6, SHAPE_DRAG = 7, LASSO = 8,
+            XF_MOVE = 9, XF_GESTURE = 10;
+
+    // tool modes set by the editor
+    private int mShapeType = NativeEngine.SHAPE_LINE;
+    private boolean mLasso;
+    private boolean mCameraTarget;
+    private int mEase = NativeEngine.EASE_IN_OUT;
+    // shape / lasso / transform state
+    private float mShX0, mShY0, mShX1, mShY1;
+    private final java.util.ArrayList<float[]> mLassoPts = new java.util.ArrayList<>();
+    private float[] mXfBase;
+    private int mXfTarget;
+    private float mXfDownX, mXfDownY;
 
     private Listener mListener;
     private Bitmap mBitmap;
@@ -98,6 +111,10 @@ public class CanvasView extends View {
     }
 
     public void setCursorSize(float s) { mCursorSize = s; }
+    public void setShapeType(int t) { mShapeType = t; }
+    public void setLasso(boolean lasso) { mLasso = lasso; }
+    public void setCameraTarget(boolean camera) { mCameraTarget = camera; }
+    public void setEase(int ease) { mEase = ease; }
     public void setOnion(boolean on) { mOnion = on; renderAll(); }
     public void setPlaying(boolean p) { mPlaying = p; }
     public boolean isStylusMode() { return mStylusSeen; }
@@ -169,7 +186,23 @@ public class CanvasView extends View {
         c.drawBitmap(mBitmap, 0, 0, mBmpPaint);
         float lw = Ui.dp(getContext(), 1.5f) / viewScale();
         mSelPaint.setStrokeWidth(lw);
-        if (mState == SELECT_RECT) {
+        if (mState == SHAPE_DRAG) {
+            android.graphics.Paint sp = new android.graphics.Paint(mSelPaint);
+            sp.setPathEffect(null);
+            sp.setColor(0xC0000000);
+            if (mShapeType == NativeEngine.SHAPE_LINE) c.drawLine(mShX0, mShY0, mShX1, mShY1, sp);
+            else {
+                RectF r = new RectF(Math.min(mShX0, mShX1), Math.min(mShY0, mShY1),
+                        Math.max(mShX0, mShX1), Math.max(mShY0, mShY1));
+                if (mShapeType == NativeEngine.SHAPE_RECT) c.drawRect(r, sp);
+                else c.drawOval(r, sp);
+            }
+        } else if (mState == LASSO && mLassoPts.size() > 1) {
+            android.graphics.Path path = new android.graphics.Path();
+            path.moveTo(mLassoPts.get(0)[0], mLassoPts.get(0)[1]);
+            for (float[] q : mLassoPts) path.lineTo(q[0], q[1]);
+            c.drawPath(path, mSelPaint);
+        } else if (mState == SELECT_RECT) {
             c.drawRect(Math.min(mSelX0, mSelX1), Math.min(mSelY0, mSelY1),
                     Math.max(mSelX0, mSelX1), Math.max(mSelY0, mSelY1), mSelPaint);
         } else if (NativeEngine.hasSelection()) {
@@ -224,6 +257,16 @@ public class CanvasView extends View {
             case MotionEvent.ACTION_POINTER_DOWN: onSecondPointer(e); break;
             case MotionEvent.ACTION_MOVE: onMove(e); break;
             case MotionEvent.ACTION_POINTER_UP:
+                if (mState == XF_GESTURE) {
+                    // continue as a one finger move from the current key
+                    int keep = e.getActionIndex() == 0 ? 1 : 0;
+                    mState = XF_MOVE;
+                    mXfBase = NativeEngine.getXform(mXfTarget, mRow);
+                    float[] k = toDoc(e.getX(keep), e.getY(keep));
+                    mXfDownX = k[0];
+                    mXfDownY = k[1];
+                    break;
+                }
                 if (mState == NAVIGATE || mState == SEL_GESTURE) {
                     int keep = e.getActionIndex() == 0 ? 1 : 0;
                     mNavLastX = e.getX(keep);
@@ -234,6 +277,7 @@ public class CanvasView extends View {
                 break;
             case MotionEvent.ACTION_UP: onUp(e); break;
             case MotionEvent.ACTION_CANCEL:
+                if (mState == XF_MOVE || mState == XF_GESTURE) NativeEngine.endKeyEdit();
                 if (mState == DRAWING) {
                     float[] p = toDoc(e.getX(), e.getY());
                     renderDirty(NativeEngine.pointerUp(p[0], p[1], 1f));
@@ -261,6 +305,27 @@ public class CanvasView extends View {
             return;
         }
         float[] p = toDoc(mDownX, mDownY);
+        if (mTool == NativeEngine.TOOL_SHAPE) {
+            mState = SHAPE_DRAG;
+            mShX0 = mShX1 = p[0];
+            mShY0 = mShY1 = p[1];
+            return;
+        }
+        if (mTool == NativeEngine.TOOL_TRANSFORM) {
+            mState = XF_MOVE;
+            mXfTarget = mCameraTarget ? NativeEngine.CAMERA : NativeEngine.getCurrentLayer();
+            NativeEngine.beginKeyEdit(mXfTarget);
+            mXfBase = NativeEngine.getXform(mXfTarget, mRow);
+            mXfDownX = p[0];
+            mXfDownY = p[1];
+            return;
+        }
+        if (mTool == NativeEngine.TOOL_SELECT && mLasso && !NativeEngine.hasSelection()) {
+            mState = LASSO;
+            mLassoPts.clear();
+            mLassoPts.add(p);
+            return;
+        }
         if (mTool == NativeEngine.TOOL_SELECT) {
             if (NativeEngine.hasSelection()) {
                 int[] b = NativeEngine.selectionBounds();
@@ -301,6 +366,15 @@ public class CanvasView extends View {
                 renderAll();
                 mState = NAVIGATE;
             } else return;
+        } else if (mState == XF_MOVE && e.getPointerCount() >= 2) {
+            mState = XF_GESTURE;
+            mXfBase = NativeEngine.getXform(mXfTarget, mRow);
+            float[] a = toDoc(e.getX(0), e.getY(0)), b = toDoc(e.getX(1), e.getY(1));
+            mGestStartDist = (float) Math.hypot(a[0] - b[0], a[1] - b[1]);
+            mGestStartAngleRad = (float) Math.atan2(b[1] - a[1], b[0] - a[0]);
+            mGestStartCx = (a[0] + b[0]) / 2;
+            mGestStartCy = (a[1] + b[1]) / 2;
+            return;
         } else if (mState == SEL_MOVE) {
             mState = SEL_GESTURE;
             float[] a = toDoc(e.getX(0), e.getY(0)), b = toDoc(e.getX(1), e.getY(1));
@@ -332,6 +406,50 @@ public class CanvasView extends View {
                 break;
             case DRAWING: strokeMove(e); break;
             case NAVIGATE: navigate(e); break;
+            case SHAPE_DRAG: {
+                float[] p = toDoc(e.getX(), e.getY());
+                mShX1 = p[0];
+                mShY1 = p[1];
+                invalidate();
+                break;
+            }
+            case LASSO: {
+                for (int h = 0; h < e.getHistorySize(); h++)
+                    mLassoPts.add(toDoc(e.getHistoricalX(0, h), e.getHistoricalY(0, h)));
+                mLassoPts.add(toDoc(e.getX(), e.getY()));
+                invalidate();
+                break;
+            }
+            case XF_MOVE: {
+                float[] p = toDoc(e.getX(), e.getY());
+                float dx = p[0] - mXfDownX, dy = p[1] - mXfDownY;
+                float[] xf = mXfBase.clone();
+                // moving the camera right makes the scene go left: invert
+                float sign = mXfTarget == NativeEngine.CAMERA ? -1 : 1;
+                xf[0] += sign * dx;
+                xf[1] += sign * dy;
+                NativeEngine.setKeyLive(mXfTarget, mRow, xf, mEase);
+                renderAll();
+                break;
+            }
+            case XF_GESTURE: {
+                if (e.getPointerCount() < 2) break;
+                float[] a = toDoc(e.getX(0), e.getY(0)), b = toDoc(e.getX(1), e.getY(1));
+                float dist = (float) Math.hypot(a[0] - b[0], a[1] - b[1]);
+                float ang = (float) Math.atan2(b[1] - a[1], b[0] - a[0]);
+                float ratio = mGestStartDist > 1 ? dist / mGestStartDist : 1;
+                float dAng = (float) Math.toDegrees(ang - mGestStartAngleRad);
+                float[] xf = mXfBase.clone();
+                boolean cam = mXfTarget == NativeEngine.CAMERA;
+                float sign = cam ? -1 : 1;
+                xf[0] += sign * ((a[0] + b[0]) / 2 - mGestStartCx);
+                xf[1] += sign * ((a[1] + b[1]) / 2 - mGestStartCy);
+                xf[2] += sign * dAng;
+                xf[3] = mXfBase[3] * ratio;  // camera: zoom follows the pinch
+                NativeEngine.setKeyLive(mXfTarget, mRow, xf, mEase);
+                renderAll();
+                break;
+            }
             case SELECT_RECT: {
                 float[] p = toDoc(e.getX(), e.getY());
                 mSelX1 = p[0];
@@ -402,7 +520,7 @@ public class CanvasView extends View {
 
     private void onUp(MotionEvent e) {
         // the release position is the final position of a selection drag
-        if (mState == SEL_MOVE) onMove(e);
+        if (mState == SEL_MOVE || mState == XF_MOVE) onMove(e);
         float[] p = toDoc(e.getX(), e.getY());
         boolean tap = Math.hypot(e.getX() - mDownX, e.getY() - mDownY) <= mSlop * 2;
         switch (mState) {
@@ -424,6 +542,37 @@ public class CanvasView extends View {
                 break;
             case DRAWING:
                 renderDirty(NativeEngine.pointerUp(p[0], p[1], pressure(e, 0, -1)));
+                changed();
+                break;
+            case SHAPE_DRAG:
+                if (Math.hypot(p[0] - mShX0, p[1] - mShY0) > 2) {
+                    renderDirty(NativeEngine.drawShape(mShapeType, mShX0, mShY0, p[0], p[1]));
+                    changed();
+                }
+                invalidate();
+                break;
+            case LASSO: {
+                mState = NONE;
+                if (mLassoPts.size() >= 3) {
+                    float[] xy = new float[mLassoPts.size() * 2];
+                    for (int i = 0; i < mLassoPts.size(); i++) {
+                        xy[2 * i] = mLassoPts.get(i)[0];
+                        xy[2 * i + 1] = mLassoPts.get(i)[1];
+                    }
+                    if (NativeEngine.selectPolygon(xy)) {
+                        mSelDx = mSelDy = mSelAngle = 0;
+                        mSelScale = 1;
+                        if (mListener != null) mListener.onSelectionChanged(true);
+                    }
+                }
+                mLassoPts.clear();
+                renderAll();
+                break;
+            }
+            case XF_MOVE:
+            case XF_GESTURE:
+                NativeEngine.endKeyEdit();
+                renderAll();
                 changed();
                 break;
             case SELECT_RECT: {

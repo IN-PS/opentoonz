@@ -12,17 +12,28 @@
   levels: in_small_2.0001.png, Ink___Paint_1.tlv, Ink___Paint_1.tpl
   bad project -> "not an OpenToonz Mobile project"
 [save/load from a worker thread (Android autosave path)]
+[soft brush (hardness/opacity) + stabilizer]
+  soft brush centre=2 edge=236
+  50% opacity stroke = 127 / 127
+  soft eraser at the edge: 2 -> 49
+  stabilizer: dark pixels across the zig-zag at x=200: 4
+[shape tool (line/rect/ellipse) + lasso selection]
+[timing: reframe on twos/threes, exposure]
+[keyframes: layer + camera animation, ease, drawing on moved layer]
+  ease-in-out at 1/4: x=31.25 (linear would be 50)
+  rotated+50% pixel = (127,127,127)
+  stroke drawn on the moved layer, under the finger: value 64
 [export GIF + PNG sequence]
-  gif export: 11.0 ms for 8 frames
+  gif export: 11.2 ms for 8 frames
 [GIF quantizer]
 [memory (TImageCache compression) + performance, 1280x720 x 120 frames]
-  stroke segment avg: 0.045 ms
-  process RSS: 25448 KB -> 56820 KB (+31372 KB) for 120 CM32 frames; uncompressed drawings alone would be 432000 KB
-  full-frame render (onion on): 4.56 ms
-  64x64 dirty-rect render: 0.019 ms
-  save 120 frames (full): 3235 ms
-  save after editing 1 frame of a new layer (incremental): 35 ms
+  stroke segment avg: 0.022 ms
+  process RSS: 25572 KB -> 77620 KB (+52048 KB) for 120 CM32 frames; uncompressed drawings alone would be 432000 KB
+  full-frame render (onion on): 5.01 ms
+  64x64 dirty-rect render: 0.030 ms
+  save 120 frames (full): 4528 ms
+  save after editing 1 frame of a new layer (incremental): 48 ms
   save with no level changes: 1 ms
-  load 120 frames: 3725 ms
+  load 120 frames: 4213 ms
 
-126 checks passed, 0 failed
+166 checks passed, 0 failed

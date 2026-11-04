@@ -24,6 +24,11 @@ final class Mp4Exporter {
 
     /** @return null on success, otherwise an error message. */
     static String export(File out, int maxSide, Progress progress) {
+        return export(out, maxSide, progress, null);
+    }
+
+    /** @param audio project sound track muxed as AAC (may be null). */
+    static String export(File out, int maxSide, Progress progress, ProjectAudio audio) {
         int w = NativeEngine.getWidth(), h = NativeEngine.getHeight();
         float s = Math.min(1f, maxSide / (float) Math.max(w, h));
         // H.264 encoders want even sizes; multiples of 16 are the safest.
@@ -45,6 +50,15 @@ final class Mp4Exporter {
             codec.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             codec.start();
             muxer = new MediaMuxer(out.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+            ProjectAudio.EncodedAudio aac = null;
+            if (audio != null) {
+                try {
+                    aac = audio.encodeAac(frames, fps);
+                } catch (IOException | RuntimeException e) {
+                    aac = null;  // export the video without sound rather than fail
+                }
+            }
+            int audioTrack = -1;
 
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
             int track = -1;
@@ -75,6 +89,7 @@ final class Mp4Exporter {
                 int outIdx = codec.dequeueOutputBuffer(info, 10_000);
                 if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     track = muxer.addTrack(codec.getOutputFormat());
+                    if (aac != null) audioTrack = muxer.addTrack(aac.format);
                     muxer.start();
                     muxing = true;
                 } else if (outIdx >= 0) {
@@ -91,6 +106,9 @@ final class Mp4Exporter {
                 }
             }
             if (written == 0) return "encoder produced no frames";
+            if (aac != null && audioTrack >= 0)
+                for (int i = 0; i < aac.samples.size(); i++)
+                    muxer.writeSampleData(audioTrack, aac.samples.get(i), aac.infos.get(i));
             return null;
         } catch (IOException | RuntimeException e) {
             return e.toString();

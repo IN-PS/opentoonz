@@ -1,4 +1,7 @@
-    [app-test] project created: /tmp/robolectric-Method_t1_projectManagerCreatesProject2364561830296466371/org.opentoonz.mobile-dataDir/files/projects/Test One files=[levels, project.otm, palette.tpl, thumbnail.png]
+    [app-test] audio: 12 frame peaks; frame1=0.48825073 frame12=0.0
+    [app-test] audio playback toggle OK
+AppFlowTest > t10_audioTrackWaveform PASSED
+    [app-test] project created: /tmp/robolectric-Method_t1_projectManagerCreatesProject4724424921195235110/org.opentoonz.mobile-dataDir/files/projects/Test One files=[levels, project.otm, palette.tpl, thumbnail.png]
 AppFlowTest > t1_projectManagerCreatesProject PASSED
     [app-test] canvas view 846x378, document 960x540
     [app-test] brush stroke OK
@@ -16,13 +19,23 @@ AppFlowTest > t2_drawFramesOnionLayersFillUndoSelectPlaySaveReopen PASSED
     [app-test] autosave on pause OK
 AppFlowTest > t3_autosaveOnPause PASSED
     [app-test] import flow OK (raster layer added)
-    [app-test] GIF exported: 6331 bytes (ImportExport.gif)
+    [app-test] GIF exported: 6462 bytes (ImportExport.gif)
     [app-test] PNG sequence: [ImportExport.0001.png, ImportExport.0002.png]
     [app-test] MP4 on JVM: encoder produced a file
 AppFlowTest > t4_importAndExport PASSED
     [app-test] portrait: drawing still works, canvas 846x378
 AppFlowTest > t5_rotationKeepsWorking PASSED
     [app-test] stylus tool type visible to the UI under Robolectric 3.8: false (legacy MotionEvent shadow drops toolType; UI stylus path needs a device)
-    [app-test] stylus: line width at low pressure=1px, high pressure=31px
+    [app-test] stylus: line width at low pressure=1px, high pressure=21px
 AppFlowTest > t6_stylusPressure PASSED
-BUILD SUCCESSFUL in 22s
+    [app-test] shape tool: rectangle drawn
+    [app-test] lasso selection: moved only the enclosed pixels
+AppFlowTest > t7_shapesLassoAndProBrushUi PASSED
+    [app-test] layer keys at rows [0, 9]
+    [app-test] interpolated x at frame 6 = 233.19618
+    [app-test] camera x = 50.0
+AppFlowTest > t8_keyframesLayerAndCamera PASSED
+    [app-test] reframe on 2s: 3 drawings -> 6 frames
+    [app-test] timeline cell move OK
+AppFlowTest > t9_timingAndCellMove PASSED
+BUILD SUCCESSFUL in 26s

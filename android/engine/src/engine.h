@@ -118,6 +118,10 @@ public:
   bool hasKey(int layer, int row) const;
   void setKey(int layer, int row, const Xform &xf, Ease ease);
   void removeKey(int layer, int row);
+  //! Interactive editing (transform tool): many live updates, one undo.
+  void beginKeyEdit(int layer);
+  void setKeyLive(int layer, int row, const Xform &xf, Ease ease);
+  void endKeyEdit();
   std::vector<int> keyRows(int layer) const;
   Ease keyEase(int layer, int row) const;
 
@@ -129,6 +133,8 @@ public:
   void setExposure(int frames);
 
 private:
+  int m_keyEditLayer = -2;
+  KeyMap m_keyEditBefore;
   KeyMap *keysOf(int layer) const;
   TAffine curAff() const;
   TPointD toLayer(double x, double y) const;

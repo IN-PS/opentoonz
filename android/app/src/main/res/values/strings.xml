@@ -69,4 +69,34 @@
     <string name="value">Brightness</string>
     <string name="stylus_mode">Stylus detected: fingers now pan/zoom only</string>
     <string name="about_text">OpenToonz Mobile — engine built from the OpenToonz C++ core (tnzcore, toonzlib, TLV codec).\nMemory in use: %1$d MB\nCanvas: %2$d×%3$d @ %4$d fps</string>
+    <string name="shape">Shapes</string>
+    <string name="transform">Animate (keyframes)</string>
+    <string name="line">Line</string>
+    <string name="rectangle">Rectangle</string>
+    <string name="ellipse">Ellipse</string>
+    <string name="rect_select">Rectangle</string>
+    <string name="lasso">Lasso</string>
+    <string name="hardness">Hardness</string>
+    <string name="stabilizer">Stabilizer</string>
+    <string name="target">Target</string>
+    <string name="layer">Layer</string>
+    <string name="camera">Camera</string>
+    <string name="ease">Interpolation</string>
+    <string name="linear">Linear</string>
+    <string name="ease_in_out">Ease in/out</string>
+    <string name="constant">Hold (step)</string>
+    <string name="remove_key">Remove key</string>
+    <string name="key_hint">Drag = move, 2 fingers = rotate/scale. A key is set on this frame.</string>
+    <string name="timing">Timing</string>
+    <string name="reframe">Reframe (animate on…)</string>
+    <string name="reframe_n">On %1$ds</string>
+    <string name="exposure">Exposure of this drawing</string>
+    <string name="exposure_frames">Frames</string>
+    <string name="import_audio">Import audio</string>
+    <string name="remove_audio">Remove audio</string>
+    <string name="audio_offset">Audio start frame</string>
+    <string name="audio_volume">Volume</string>
+    <string name="audio_failed">Audio import failed: %1$s</string>
+    <string name="audio_imported">Audio imported (%1$.1f s)</string>
+    <string name="audio_settings">Audio settings</string>
 </resources>

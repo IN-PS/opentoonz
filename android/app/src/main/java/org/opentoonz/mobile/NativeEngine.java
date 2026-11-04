@@ -14,7 +14,10 @@ public final class NativeEngine {
     private NativeEngine() {}
 
     public static final int TOOL_BRUSH = 0, TOOL_ERASER = 1, TOOL_FILL = 2,
-            TOOL_SELECT = 3, TOOL_PICKER = 4;
+            TOOL_SELECT = 3, TOOL_PICKER = 4, TOOL_SHAPE = 5, TOOL_TRANSFORM = 6;
+    public static final int SHAPE_LINE = 0, SHAPE_RECT = 1, SHAPE_ELLIPSE = 2;
+    public static final int EASE_LINEAR = 0, EASE_IN_OUT = 1, EASE_CONSTANT = 2;
+    public static final int CAMERA = -1;
     public static final int FILL_AREAS = 0, FILL_LINES = 1, FILL_ALL = 2;
     public static final int ERASE_ALL = 0, ERASE_LINES = 1, ERASE_AREAS = 2;
     public static final int LAYER_TOONZ_RASTER = 0, LAYER_RASTER = 1;
@@ -119,4 +122,22 @@ public final class NativeEngine {
     public static native String exportGif(String path, int maxSide);
     public static native String exportPngSequence(String dir);
     public static native int getMemoryKB();
+
+    // v0.2: professional brush, shapes, lasso, timing, keyframes
+    public static native void setBrushPro(int hardness, int opacity, int stabilizer, int eraserHardness);
+    public static native int[] drawShape(int type, float x0, float y0, float x1, float y1);
+    /** Lasso selection; xy = {x0, y0, x1, y1, ...} in canvas pixels. */
+    public static native boolean selectPolygon(float[] xy);
+    public static native void reframe(int step);
+    public static native void setExposure(int frames);
+    /** Transform at a row: {x, y, rotationDeg, scale, opacity}; layer CAMERA = camera. */
+    public static native float[] getXform(int layer, int row);
+    public static native boolean hasKey(int layer, int row);
+    public static native int getKeyEase(int layer, int row);
+    public static native void setKey(int layer, int row, float[] xform, int ease);
+    public static native void removeKey(int layer, int row);
+    public static native void beginKeyEdit(int layer);
+    public static native void setKeyLive(int layer, int row, float[] xform, int ease);
+    public static native void endKeyEdit();
+    public static native int[] getKeyRows(int layer);
 }

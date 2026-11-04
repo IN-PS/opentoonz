@@ -50,6 +50,18 @@ físico, exportação de sequência PNG, interface em português e inglês.
 | Caneta digital | pressão (`getPressure`), `TOOL_TYPE_STYLUS/ERASER`, cursor em *hover*, rejeição de palma (após detectar caneta, dedos só navegam) |
 | Horizontal e vertical | `configChanges` tratados; layout em blocos que se adapta às duas orientações |
 
+## 0. Versão 0.2.0 — recursos para animação profissional
+
+Pincel com dureza/opacidade, borracha macia, estabilizador, formas (linha,
+retângulo, elipse), seleção laço, keyframes de camada e câmera com ease,
+reframe 1s/2s/3s, exposição, arrastar células, trilha de áudio com forma de
+onda, scrub e áudio no MP4. Detalhes em `releases/v0.2.0/NOTAS.md`.
+Testes: motor 166/166, app na JVM 10/10. Também foi corrigido um bug do
+OpenToonz em `common/tcache/timagecache.cpp` (ver commit).
+
+Ainda incompatível/ausente: vetores, pincel MyPaint/texturizado, FX,
+esqueleto/plastic, `.tnz` do desktop, múltiplas trilhas de áudio.
+
 ## 3a. Testes do app na JVM (Robolectric) — v0.1.1
 
 `android/hosttest/run-tests.sh` executa o **app real** (Activities, Views,
@@ -129,11 +141,13 @@ oficial (`android/docs/COMPILACAO.md`).
   rasterização em CPU (no desktop é OpenGL).
 * Pincel MyPaint / pincel "blurred" (hardness < 100) e pincéis personalizados.
 * Sistema de FX (`tnzbase`, `stdfx`, `colorfx`), schematic, render farm.
-* Pegs/câmera/animação de transformação (`TStageObject`), curvas de função,
+* Pegs com hierarquia, curvas de função e expressões do `TStageObject`
+  (a v0.2.0 tem keyframes de camada/câmera próprios, sem hierarquia),
   esqueleto/IK, deformação *plastic* (`tnzext`, SuperLU/BLAS).
-* Áudio (colunas de som, lip-sync), stop motion, cleanup/scanner.
+* Múltiplas colunas de som e lip-sync automático (a v0.2.0 tem uma trilha
+  de áudio com forma de onda e scrub), stop motion, cleanup/scanner.
 * Outros formatos: TIFF, PSD, TGA, BMP, SVG, WebM/AVI/APNG (ffmpeg).
-* Seleção laço/poligonal (só retangular), régua, grade/guia de câmera.
+* Régua, grade/guia de câmera.
 * Interface Qt do desktop (`toonz`, `toonzqt`) — substituída pela UI móvel.
 
 ## 6. Arquivos de origem alterados no OpenToonz

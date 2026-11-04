@@ -476,4 +476,150 @@ public class AppFlowTest {
         assertTrue(thick > thin * 3);
         c.pause().stop().destroy();
     }
+
+    static android.widget.Spinner spinner(Activity a, int index) {
+        List<android.widget.Spinner> sp = find(a.getWindow().getDecorView(), android.widget.Spinner.class);
+        return sp.get(index);
+    }
+
+    static void select(android.widget.Spinner sp, int pos) {
+        sp.setSelection(pos);
+        android.widget.AdapterView.OnItemSelectedListener l = sp.getOnItemSelectedListener();
+        if (l != null) l.onItemSelected(sp, null, pos, pos);
+        idle();
+    }
+
+    @Test
+    public void t7_shapesLassoAndProBrushUi() {
+        File dir = createProject("ProTools");
+        ActivityController<EditorActivity> c = openEditor(dir);
+        EditorActivity a = c.get();
+        CanvasView canvas = find(a.getWindow().getDecorView(), CanvasView.class).get(0);
+        // shape tool: rectangle
+        click(a, "Shapes");
+        select(spinner(a, 0), NativeEngine.SHAPE_RECT);
+        drag(canvas, line(100, 100, 300, 250, 10));
+        Bitmap f = frame(0, false);
+        assertTrue(dark(f.getPixel(200, 100)) && dark(f.getPixel(300, 175)) && white(f.getPixel(200, 175)));
+        log("shape tool: rectangle drawn");
+        // lasso around the top-left corner, then move it
+        click(a, "Selection");
+        select(spinner(a, 0), 1);
+        drag(canvas, new float[][]{{90, 90}, {160, 90}, {90, 160}, {90, 90}});
+        assertTrue("lasso active", NativeEngine.hasSelection());
+        drag(canvas, line(100, 100, 100, 400, 10));
+        click(a, "Apply");
+        Bitmap g = frame(0, false);
+        assertTrue(white(g.getPixel(120, 100)));
+        assertTrue(dark(g.getPixel(120, 400)));
+        assertTrue(dark(g.getPixel(250, 100)));   // outside the lasso stays
+        log("lasso selection: moved only the enclosed pixels");
+        c.pause().stop().destroy();
+    }
+
+    @Test
+    public void t8_keyframesLayerAndCamera() {
+        File dir = createProject("Keys");
+        ActivityController<EditorActivity> c = openEditor(dir);
+        EditorActivity a = c.get();
+        CanvasView canvas = find(a.getWindow().getDecorView(), CanvasView.class).get(0);
+        drag(canvas, line(100, 270, 140, 270, 10));             // a dash
+        for (int i = 0; i < 9; i++) click(a, "Hold (extend) frame");
+        assertEquals(10, NativeEngine.getFrameCount());
+        click(a, "Animate (keyframes)");
+        NativeEngine.setCurrentRow(0);
+        canvas.showRow(0);
+        drag(canvas, line(500, 300, 500, 300, 2));               // tap: key at frame 1
+        NativeEngine.setCurrentRow(9);
+        canvas.showRow(9);
+        drag(canvas, line(500, 300, 900, 300, 20));              // move right 400 at frame 10
+        int[] keys = NativeEngine.getKeyRows(0);
+        log("layer keys at rows " + java.util.Arrays.toString(keys));
+        assertEquals(2, keys.length);
+        float mid = NativeEngine.getXform(0, 5)[0];
+        log("interpolated x at frame 6 = " + mid);
+        assertTrue(mid > 150 && mid < 400);
+        assertTrue(dark(frame(9, false).getPixel(520, 270)));
+        assertTrue(white(frame(9, false).getPixel(120, 270)));
+        // camera key: pan
+        select(spinner(a, 0), 1);                                 // target = camera
+        NativeEngine.setCurrentRow(0);
+        canvas.showRow(0);
+        drag(canvas, line(500, 300, 450, 300, 10));               // drag left: camera moves right
+        assertEquals(1, NativeEngine.getKeyRows(NativeEngine.CAMERA).length);
+        float camX = NativeEngine.getXform(NativeEngine.CAMERA, 0)[0];
+        log("camera x = " + camX);
+        assertTrue(camX > 40 && camX < 60);
+        // single undo per drag
+        click(a, "Undo");
+        assertEquals(0, NativeEngine.getKeyRows(NativeEngine.CAMERA).length);
+        // keys survive save + reopen
+        saveAndWait(a);
+        c.pause().stop().destroy();
+        NativeEngine.newDocument(64, 64, 12);
+        ActivityController<EditorActivity> c2 = openEditor(dir);
+        assertEquals(2, NativeEngine.getKeyRows(0).length);
+        c2.pause().stop().destroy();
+    }
+
+    @Test
+    public void t9_timingAndCellMove() {
+        File dir = createProject("Timing");
+        ActivityController<EditorActivity> c = openEditor(dir);
+        EditorActivity a = c.get();
+        CanvasView canvas = find(a.getWindow().getDecorView(), CanvasView.class).get(0);
+        for (int f = 0; f < 3; f++) {
+            if (f > 0) click(a, "New frame");
+            drag(canvas, line(100 + f * 100, 100, 150 + f * 100, 100, 8));
+        }
+        assertEquals(3, NativeEngine.getFrameCount());
+        click(a, "Timing");
+        AlertDialog d = ShadowAlertDialog.getLatestAlertDialog();
+        android.widget.Button on2 = null;
+        for (android.widget.Button b : find(d.getWindow().getDecorView(), android.widget.Button.class))
+            if ("On 2s".contentEquals(b.getText())) on2 = b;
+        assertNotNull(on2);
+        on2.performClick();
+        idle();
+        assertEquals(6, NativeEngine.getFrameCount());
+        assertEquals(NativeEngine.getCell(0, 0), NativeEngine.getCell(0, 1));
+        log("reframe on 2s: 3 drawings -> 6 frames");
+        // drag a cell in the timeline (long press + move) -> moveCell
+        int d4 = NativeEngine.getCell(0, 4);
+        ((TimelineView.Listener) a).onCellMoved(0, 4, 0);
+        assertEquals(d4, NativeEngine.getCell(0, 0));
+        log("timeline cell move OK");
+        c.pause().stop().destroy();
+    }
+
+    @Test
+    public void t10_audioTrackWaveform() throws Exception {
+        File dir = createProject("Audio");
+        // 1 s 440 Hz tone, silent second half, 22050 Hz mono
+        short[] pcm = new short[22050];
+        for (int i = 0; i < pcm.length; i++)
+            pcm[i] = (short) (i < 11025 ? 16000 * Math.sin(2 * Math.PI * 440 * i / 22050.0) : 0);
+        File wav = new File(dir, ProjectAudio.WAV);
+        ProjectAudio.writeWav(wav, pcm, 22050, 1);
+        // Robolectric's MediaPlayer stand-in must be told about the media
+        org.robolectric.shadows.ShadowMediaPlayer.addMediaInfo(
+                org.robolectric.shadows.util.DataSource.toDataSource(wav.getAbsolutePath()),
+                new org.robolectric.shadows.ShadowMediaPlayer.MediaInfo(1000, 0));
+        ActivityController<EditorActivity> c = openEditor(dir);
+        EditorActivity a = c.get();
+        TimelineView tl = find(a.getWindow().getDecorView(), TimelineView.class).get(0);
+        java.lang.reflect.Field fp = TimelineView.class.getDeclaredField("mAudioPeaks");
+        fp.setAccessible(true);
+        float[] peaks = (float[]) fp.get(tl);
+        assertNotNull("waveform shown in the timeline", peaks);
+        log("audio: " + peaks.length + " frame peaks; frame1=" + peaks[0] + " frame12=" + peaks[peaks.length - 1]);
+        assertEquals(NativeEngine.getFps(), peaks.length);       // 1 s
+        assertTrue(peaks[0] > 0.45f && peaks[0] < 0.5f);          // 16000/32768
+        assertEquals(0f, peaks[peaks.length - 1], 1e-6);          // silent half
+        // playback with sound does not crash (MediaPlayer is a Robolectric stub)
+        click(a, "Play");
+        click(a, "Play");
+        log("audio playback toggle OK");
+        c.pause().stop().destroy();
+    }
 }

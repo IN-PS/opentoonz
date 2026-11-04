@@ -68,4 +68,34 @@
     <string name="value">Brilho</string>
     <string name="stylus_mode">Caneta detectada: os dedos agora apenas movem/ampliam</string>
     <string name="about_text">OpenToonz Mobile — motor construído a partir do núcleo C++ do OpenToonz (tnzcore, toonzlib, codec TLV).\nMemória em uso: %1$d MB\nTela: %2$d×%3$d a %4$d fps</string>
+    <string name="shape">Formas</string>
+    <string name="transform">Animar (keyframes)</string>
+    <string name="line">Linha</string>
+    <string name="rectangle">Retângulo</string>
+    <string name="ellipse">Elipse</string>
+    <string name="rect_select">Retângulo</string>
+    <string name="lasso">Laço</string>
+    <string name="hardness">Dureza</string>
+    <string name="stabilizer">Estabilizador</string>
+    <string name="target">Alvo</string>
+    <string name="layer">Camada</string>
+    <string name="camera">Câmera</string>
+    <string name="ease">Interpolação</string>
+    <string name="linear">Linear</string>
+    <string name="ease_in_out">Suavizar entrada/saída</string>
+    <string name="constant">Manter (degrau)</string>
+    <string name="remove_key">Remover keyframe</string>
+    <string name="key_hint">Arrastar = mover, 2 dedos = girar/escalar. Um keyframe é criado neste quadro.</string>
+    <string name="timing">Tempo</string>
+    <string name="reframe">Reframe (animar em…)</string>
+    <string name="reframe_n">Em %1$ds</string>
+    <string name="exposure">Exposição deste desenho</string>
+    <string name="exposure_frames">Quadros</string>
+    <string name="import_audio">Importar áudio</string>
+    <string name="remove_audio">Remover áudio</string>
+    <string name="audio_offset">Quadro inicial do áudio</string>
+    <string name="audio_volume">Volume</string>
+    <string name="audio_failed">Falha ao importar áudio: %1$s</string>
+    <string name="audio_imported">Áudio importado (%1$.1f s)</string>
+    <string name="audio_settings">Configurações de áudio</string>
 </resources>

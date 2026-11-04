@@ -484,3 +484,74 @@ JF(jstring, exportPngSequence)(JNIEnv *env, jclass, jstring dir) {
   return errOrNull(env, ok, err);
 }
 JF(jint, getMemoryKB)(JNIEnv *, jclass) { return (jint)E().memoryKB(); }
+
+// ------------------------------------------------------------------ v0.2
+JF(void, setBrushPro)(JNIEnv *, jclass, jint hardness, jint opacity,
+                      jint stabilizer, jint eraserHardness) {
+  std::lock_guard<std::recursive_mutex> lk(E().mutex());
+  E().settings.hardness       = std::max(0, std::min(100, (int)hardness));
+  E().settings.opacity        = std::max(1, std::min(100, (int)opacity));
+  E().settings.stabilizer     = std::max(0, std::min(10, (int)stabilizer));
+  E().settings.eraserHardness = std::max(0, std::min(100, (int)eraserHardness));
+}
+JF(jintArray, drawShape)(JNIEnv *env, jclass, jint type, jfloat x0, jfloat y0,
+                         jfloat x1, jfloat y1) {
+  return rect(env, E().drawShape(type, x0, y0, x1, y1));
+}
+JF(jboolean, selectPolygon)(JNIEnv *env, jclass, jfloatArray xy) {
+  jsize n = env->GetArrayLength(xy);
+  std::vector<jfloat> v(n);
+  env->GetFloatArrayRegion(xy, 0, n, v.data());
+  std::vector<std::pair<double, double>> pts;
+  for (jsize i = 0; i + 1 < n; i += 2) pts.push_back({v[i], v[i + 1]});
+  return E().selectPolygon(pts);
+}
+JF(void, reframe)(JNIEnv *, jclass, jint step) { E().reframe(step); }
+JF(void, setExposure)(JNIEnv *, jclass, jint n) { E().setExposure(n); }
+
+static Xform xformFrom(JNIEnv *env, jfloatArray a) {
+  jfloat v[5] = {0, 0, 0, 1, 1};
+  env->GetFloatArrayRegion(a, 0, std::min<jsize>(5, env->GetArrayLength(a)), v);
+  Xform f;
+  f.x = v[0], f.y = v[1], f.rot = v[2], f.scale = v[3], f.opacity = v[4];
+  return f;
+}
+//! {x, y, rotation, scale, opacity}; layer -1 = camera (scale = zoom)
+JF(jfloatArray, getXform)(JNIEnv *env, jclass, jint layer, jint row) {
+  std::lock_guard<std::recursive_mutex> lk(E().mutex());
+  Xform f      = E().xformAt(layer, row);
+  jfloat v[5] = {(jfloat)f.x, (jfloat)f.y, (jfloat)f.rot, (jfloat)f.scale,
+                 (jfloat)f.opacity};
+  jfloatArray a = env->NewFloatArray(5);
+  env->SetFloatArrayRegion(a, 0, 5, v);
+  return a;
+}
+JF(jboolean, hasKey)(JNIEnv *, jclass, jint layer, jint row) {
+  std::lock_guard<std::recursive_mutex> lk(E().mutex());
+  return E().hasKey(layer, row);
+}
+JF(jint, getKeyEase)(JNIEnv *, jclass, jint layer, jint row) {
+  std::lock_guard<std::recursive_mutex> lk(E().mutex());
+  return (jint)E().keyEase(layer, row);
+}
+JF(void, setKey)(JNIEnv *env, jclass, jint layer, jint row, jfloatArray xf,
+                 jint ease) {
+  E().setKey(layer, row, xformFrom(env, xf), (Ease)ease);
+}
+JF(void, removeKey)(JNIEnv *, jclass, jint layer, jint row) {
+  E().removeKey(layer, row);
+}
+JF(void, beginKeyEdit)(JNIEnv *, jclass, jint layer) { E().beginKeyEdit(layer); }
+JF(void, setKeyLive)(JNIEnv *env, jclass, jint layer, jint row, jfloatArray xf,
+                     jint ease) {
+  E().setKeyLive(layer, row, xformFrom(env, xf), (Ease)ease);
+}
+JF(void, endKeyEdit)(JNIEnv *, jclass) { E().endKeyEdit(); }
+JF(jintArray, getKeyRows)(JNIEnv *env, jclass, jint layer) {
+  std::lock_guard<std::recursive_mutex> lk(E().mutex());
+  auto r = E().keyRows(layer);
+  std::vector<jint> v(r.begin(), r.end());
+  jintArray a = env->NewIntArray((jsize)v.size());
+  env->SetIntArrayRegion(a, 0, (jsize)v.size(), v.data());
+  return a;
+}

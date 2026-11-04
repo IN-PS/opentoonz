@@ -48,7 +48,8 @@ import java.util.concurrent.Executors;
 public class EditorActivity extends Activity implements CanvasView.Listener,
         TimelineView.Listener, LayerPanel.Listener {
     static final String EXTRA_DIR = "dir", EXTRA_NEW = "new";
-    private static final int REQ_IMPORT = 1, REQ_IMPORT_SEQ = 2, REQ_SAVE_GIF = 3, REQ_SAVE_MP4 = 4;
+    private static final int REQ_IMPORT = 1, REQ_IMPORT_SEQ = 2, REQ_SAVE_GIF = 3, REQ_SAVE_MP4 = 4,
+            REQ_IMPORT_AUDIO = 5;
     private static final long AUTOSAVE_MS = 30_000;
 
     private File mDir;
@@ -56,7 +57,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
     private TimelineView mTimeline;
     private LayerPanel mLayers;
     private LinearLayout mSwatches, mToolOptions, mSelBar;
-    private ImageButton[] mToolButtons = new ImageButton[5];
+    private ImageButton[] mToolButtons = new ImageButton[7];
     private ImageButton mOnionBtn, mPlayBtn, mLayersBtn;
     private TextView mStatus, mFrameLabel;
     private final ExecutorService mIo = Executors.newSingleThreadExecutor();
@@ -68,6 +69,11 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
     private int mBrushMax = 8, mBrushMin = 3, mEraserSize = 24, mEraseMode = NativeEngine.ERASE_ALL,
             mFillMode = NativeEngine.FILL_AREAS, mFillDepth = 10;
     private boolean mPressure = true, mAntialias = true, mFillEmpty;
+    // v0.2 tool settings
+    private int mHardness = 100, mOpacity = 100, mStabilizer = 2, mEraserHardness = 100;
+    private int mShapeType = NativeEngine.SHAPE_LINE, mEase = NativeEngine.EASE_IN_OUT;
+    private boolean mLasso, mCameraTarget;
+    private ProjectAudio mAudio;
     private File mPendingExport;
 
     @Override
@@ -97,6 +103,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
                         mCanvas.setOnion(onion[0] != 0);
                         Ui.setActive(mOnionBtn, onion[0] != 0);
                         mCanvas.documentLoaded();
+                        loadAudio();
                         applyToolSettings();
                         selectTool(NativeEngine.TOOL_BRUSH);
                         refreshAll();
@@ -190,8 +197,9 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         tools.setOrientation(LinearLayout.VERTICAL);
         tools.setPadding(Ui.dp(this, 2), Ui.dp(this, 4), Ui.dp(this, 2), Ui.dp(this, 4));
         int[] icons = {R.drawable.ic_brush, R.drawable.ic_eraser, R.drawable.ic_fill,
-                R.drawable.ic_select, R.drawable.ic_picker};
-        int[] names = {R.string.brush, R.string.eraser, R.string.fill, R.string.select, R.string.picker};
+                R.drawable.ic_select, R.drawable.ic_picker, R.drawable.ic_shape, R.drawable.ic_transform};
+        int[] names = {R.string.brush, R.string.eraser, R.string.fill, R.string.select, R.string.picker,
+                R.string.shape, R.string.transform};
         for (int i = 0; i < icons.length; i++) {
             final int tool = i;
             mToolButtons[i] = Ui.iconButton(this, icons[i], getString(names[i]), 50);
@@ -289,6 +297,11 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         addFrameButton(fb, R.drawable.ic_delete, R.string.frame_del, new Runnable() {
             @Override public void run() { NativeEngine.deleteFrame(); }
         });
+        ImageButton timing = Ui.iconButton(this, R.drawable.ic_timing, getString(R.string.timing), 44);
+        timing.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { timingDialog(); }
+        });
+        fb.addView(timing);
         fbScroll.addView(fb);
         root.addView(fbScroll);
 
@@ -326,6 +339,11 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         NativeEngine.setEraser(mEraserSize, mEraseMode);
         NativeEngine.setFill(mFillMode, mFillDepth, mFillEmpty);
         mCanvas.setCursorSize(mTool == NativeEngine.TOOL_ERASER ? mEraserSize : mBrushMax);
+        NativeEngine.setBrushPro(mHardness, mOpacity, mStabilizer, mEraserHardness);
+        mCanvas.setShapeType(mShapeType);
+        mCanvas.setLasso(mLasso);
+        mCanvas.setCameraTarget(mCameraTarget);
+        mCanvas.setEase(mEase);
     }
 
     private void buildToolOptions() {
@@ -338,6 +356,15 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
                 addSlider(getString(R.string.min_size), 1, 100, mBrushMin, new Ui.IntListener() {
                     @Override public void onValue(int v) { mBrushMin = v; applyToolSettings(); }
                 });
+                addSlider(getString(R.string.hardness), 0, 100, mHardness, new Ui.IntListener() {
+                    @Override public void onValue(int v) { mHardness = v; applyToolSettings(); }
+                });
+                addSlider(getString(R.string.opacity), 1, 100, mOpacity, new Ui.IntListener() {
+                    @Override public void onValue(int v) { mOpacity = v; applyToolSettings(); }
+                });
+                addSlider(getString(R.string.stabilizer), 0, 10, mStabilizer, new Ui.IntListener() {
+                    @Override public void onValue(int v) { mStabilizer = v; applyToolSettings(); }
+                });
                 addCheck(getString(R.string.pressure), mPressure, new CompoundButton.OnCheckedChangeListener() {
                     @Override public void onCheckedChanged(CompoundButton b, boolean c) { mPressure = c; applyToolSettings(); }
                 });
@@ -348,6 +375,9 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
             case NativeEngine.TOOL_ERASER:
                 addSlider(getString(R.string.size), 1, 200, mEraserSize, new Ui.IntListener() {
                     @Override public void onValue(int v) { mEraserSize = v; applyToolSettings(); }
+                });
+                addSlider(getString(R.string.hardness), 0, 100, mEraserHardness, new Ui.IntListener() {
+                    @Override public void onValue(int v) { mEraserHardness = v; applyToolSettings(); }
                 });
                 addSpinner(new String[]{getString(R.string.lines_areas), getString(R.string.lines),
                         getString(R.string.areas)}, mEraseMode, new Ui.IntListener() {
@@ -366,9 +396,54 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
                     @Override public void onCheckedChanged(CompoundButton b, boolean c) { mFillEmpty = c; applyToolSettings(); }
                 });
                 break;
+            case NativeEngine.TOOL_SELECT:
+                addSpinner(new String[]{getString(R.string.rect_select), getString(R.string.lasso)},
+                        mLasso ? 1 : 0, new Ui.IntListener() {
+                    @Override public void onValue(int v) { mLasso = v == 1; applyToolSettings(); }
+                });
+                break;
+            case NativeEngine.TOOL_SHAPE:
+                addSpinner(new String[]{getString(R.string.line), getString(R.string.rectangle),
+                        getString(R.string.ellipse)}, mShapeType, new Ui.IntListener() {
+                    @Override public void onValue(int v) { mShapeType = v; applyToolSettings(); }
+                });
+                addSlider(getString(R.string.size), 1, 100, mBrushMax, new Ui.IntListener() {
+                    @Override public void onValue(int v) { mBrushMax = v; applyToolSettings(); }
+                });
+                break;
+            case NativeEngine.TOOL_TRANSFORM:
+                addSpinner(new String[]{getString(R.string.layer), getString(R.string.camera)},
+                        mCameraTarget ? 1 : 0, new Ui.IntListener() {
+                    @Override public void onValue(int v) { mCameraTarget = v == 1; applyToolSettings(); }
+                });
+                addSpinner(new String[]{getString(R.string.linear), getString(R.string.ease_in_out),
+                        getString(R.string.constant)}, mEase, new Ui.IntListener() {
+                    @Override public void onValue(int v) {
+                        mEase = v;
+                        applyToolSettings();
+                        int target = mCameraTarget ? NativeEngine.CAMERA : NativeEngine.getCurrentLayer();
+                        int row = NativeEngine.getCurrentRow();
+                        if (NativeEngine.hasKey(target, row)
+                                && NativeEngine.getKeyEase(target, row) != v)
+                            NativeEngine.setKey(target, row, NativeEngine.getXform(target, row), v);
+                    }
+                });
+                android.widget.Button rm = new android.widget.Button(this);
+                rm.setText(R.string.remove_key);
+                rm.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        int target = mCameraTarget ? NativeEngine.CAMERA : NativeEngine.getCurrentLayer();
+                        NativeEngine.removeKey(target, NativeEngine.getCurrentRow());
+                        refreshAll();
+                    }
+                });
+                mToolOptions.addView(rm);
+                TextView hint = Ui.label(this, getString(R.string.key_hint), 12);
+                hint.setTextColor(Ui.DIM);
+                mToolOptions.addView(hint);
+                break;
             default:
-                mToolOptions.addView(Ui.label(this, getString(mTool == NativeEngine.TOOL_SELECT
-                        ? R.string.select : R.string.picker), 13));
+                mToolOptions.addView(Ui.label(this, getString(R.string.picker), 13));
         }
     }
 
@@ -461,6 +536,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         mCanvas.showRow(row);
         mTimeline.refresh();
         updateFrameLabel(row);
+        if (mAudio != null) mAudio.scrub(row, NativeEngine.getFps(), mUi);  // lip-sync scrub
     }
 
     // ------------------------------------------------------------------ listeners
@@ -480,6 +556,13 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
 
     @Override public void onStylusDetected() {
         Toast.makeText(this, R.string.stylus_mode, Toast.LENGTH_SHORT).show();
+    }
+
+    @Override public void onCellMoved(int layer, int from, int to) {
+        if (mPlaying) return;
+        NativeEngine.setCurrentLayer(layer);
+        NativeEngine.moveCell(from, to);
+        refreshAll();
     }
 
     @Override public void onCellSelected(int layer, int row) {
@@ -540,6 +623,10 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
             if (!mPlaying) return;
             int frames = NativeEngine.getFrameCount();
             mPlayRow = (mPlayRow + 1) % Math.max(1, frames);
+            if (mPlayRow == 0 && mAudio != null) {  // loop: restart the sound
+                mAudio.pause();
+                mAudio.play(0, NativeEngine.getFps());
+            }
             mCanvas.showRow(mPlayRow);
             mTimeline.setCurrentRow(mPlayRow);
             updateFrameLabel(mPlayRow);
@@ -555,9 +642,11 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         if (mPlaying) {
             if (NativeEngine.hasSelection()) { NativeEngine.commitSelection(); mCanvas.selectionDone(); }
             mPlayRow = NativeEngine.getCurrentRow();
+            if (mAudio != null) mAudio.play(mPlayRow, NativeEngine.getFps());
             mUi.post(mPlayTick);
         } else {
             mUi.removeCallbacks(mPlayTick);
+            if (mAudio != null) mAudio.pause();
             NativeEngine.setCurrentRow(mPlayRow);
             refreshAll();
         }
@@ -582,7 +671,8 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
     private void showMenu(View anchor) {
         final int[] ids = {R.string.save, R.string.import_images, R.string.import_sequence,
                 R.string.export_gif, R.string.export_mp4, R.string.export_png,
-                R.string.onion_settings, R.string.scene_settings, R.string.memory_info};
+                R.string.onion_settings, R.string.scene_settings, R.string.import_audio,
+                R.string.audio_settings, R.string.memory_info};
         String[] items = new String[ids.length];
         for (int i = 0; i < ids.length; i++) items[i] = getString(ids[i]);
         new AlertDialog.Builder(this).setItems(items, new android.content.DialogInterface.OnClickListener() {
@@ -597,6 +687,8 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
                     case R.string.onion_settings: onionSettings(); break;
                     case R.string.scene_settings: sceneSettings(); break;
                     case R.string.memory_info: about(); break;
+                    case R.string.import_audio: pickAudio(); break;
+                    case R.string.audio_settings: audioSettings(); break;
                 }
             }
         }).show();
@@ -672,6 +764,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
     protected void onDestroy() {
         super.onDestroy();
         mUi.removeCallbacks(mAutosave);
+        if (mAudio != null) mAudio.release();
         mIo.shutdown();
     }
 
@@ -762,7 +855,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
                             @Override public void run() { pd.setMessage(getString(R.string.exporting) + " " + done + "/" + total); }
                         });
                     }
-                });
+                }, mAudio);
             }
         });
     }
@@ -849,9 +942,126 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
                 for (int i : idx) sorted.add(uris.get(i));
                 importUris(sorted, true);
             } else importUris(uris, false);
+        } else if (req == REQ_IMPORT_AUDIO) {
+            importAudio(data.getData());
         } else if ((req == REQ_SAVE_GIF || req == REQ_SAVE_MP4) && mPendingExport != null) {
             copyTo(mPendingExport, data.getData());
         }
+    }
+
+    // ------------------------------------------------------------------ timing
+    private void timingDialog() {
+        if (!mLoaded || mPlaying) return;
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(LinearLayout.VERTICAL);
+        int p = Ui.dp(this, 16);
+        l.setPadding(p, p, p, 0);
+        l.addView(Ui.label(this, getString(R.string.reframe), 15));
+        LinearLayout row = new LinearLayout(this);
+        final AlertDialog[] dlg = new AlertDialog[1];
+        for (int n = 1; n <= 3; n++) {
+            final int step = n;
+            android.widget.Button b = new android.widget.Button(this);
+            b.setText(getString(R.string.reframe_n, n));
+            b.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    NativeEngine.reframe(step);
+                    refreshAll();
+                    if (dlg[0] != null) dlg[0].dismiss();
+                }
+            });
+            row.addView(b);
+        }
+        l.addView(row);
+        final int[] exp = {1};
+        int r = NativeEngine.getCurrentRow(), layer = NativeEngine.getCurrentLayer();
+        int d = NativeEngine.getCell(layer, r);
+        if (d > 0) {
+            int a = r, b = r;
+            while (a > 0 && NativeEngine.getCell(layer, a - 1) == d) a--;
+            while (NativeEngine.getCell(layer, b + 1) == d) b++;
+            exp[0] = b - a + 1;
+        }
+        l.addView(Ui.label(this, getString(R.string.exposure), 15));
+        l.addView(Ui.slider(this, getString(R.string.exposure_frames), 1, 24, exp[0], new Ui.IntListener() {
+            @Override public void onValue(int v) { exp[0] = v; }
+        }));
+        dlg[0] = new AlertDialog.Builder(this).setTitle(R.string.timing).setView(l)
+                .setPositiveButton(R.string.apply, new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface di, int w) {
+                        NativeEngine.setExposure(exp[0]);
+                        refreshAll();
+                    }
+                }).setNegativeButton(R.string.cancel, null).show();
+    }
+
+    // ------------------------------------------------------------------ audio
+    private void loadAudio() {
+        if (mAudio != null) mAudio.release();
+        mAudio = ProjectAudio.load(mDir);
+        float[] peaks = null;
+        if (mAudio != null) {
+            try { peaks = mAudio.peaks(NativeEngine.getFps()); } catch (java.io.IOException ignored) {}
+        }
+        mTimeline.setAudio(peaks, mAudio != null ? mAudio.offsetFrames : 0);
+    }
+
+    private void pickAudio() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("audio/*");
+        startActivityForResult(i, REQ_IMPORT_AUDIO);
+    }
+
+    private void importAudio(final Uri uri) {
+        if (uri == null) return;
+        final ProgressDialog pd = ProgressDialog.show(this, null, getString(R.string.import_audio), true, false);
+        mIo.execute(new Runnable() {
+            @Override public void run() {
+                final String err = ProjectAudio.importFrom(EditorActivity.this, uri, mDir);
+                mUi.post(new Runnable() {
+                    @Override public void run() {
+                        pd.dismiss();
+                        loadAudio();
+                        Toast.makeText(EditorActivity.this, err == null
+                                ? getString(R.string.audio_imported, mAudio != null ? mAudio.durationSec() : 0)
+                                : getString(R.string.audio_failed, err), Toast.LENGTH_LONG).show();
+                    }
+                });
+            }
+        });
+    }
+
+    private void audioSettings() {
+        if (mAudio == null) { pickAudio(); return; }
+        final int[] off = {mAudio.offsetFrames};
+        final int[] vol = {Math.round(mAudio.volume * 100)};
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(LinearLayout.VERTICAL);
+        int p = Ui.dp(this, 16);
+        l.setPadding(p, p, p, 0);
+        l.addView(Ui.slider(this, getString(R.string.audio_offset), 0, 600, off[0], new Ui.IntListener() {
+            @Override public void onValue(int v) { off[0] = v; }
+        }));
+        l.addView(Ui.slider(this, getString(R.string.audio_volume), 0, 100, vol[0], new Ui.IntListener() {
+            @Override public void onValue(int v) { vol[0] = v; }
+        }));
+        new AlertDialog.Builder(this).setTitle(R.string.audio_settings).setView(l)
+                .setPositiveButton(R.string.ok, new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int w) {
+                        mAudio.offsetFrames = off[0];
+                        mAudio.volume = vol[0] / 100f;
+                        try { mAudio.saveProps(); } catch (java.io.IOException ignored) {}
+                        loadAudio();
+                    }
+                })
+                .setNeutralButton(R.string.remove_audio, new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int w) {
+                        mAudio.release();
+                        ProjectAudio.remove(mDir);
+                        loadAudio();
+                    }
+                }).setNegativeButton(R.string.cancel, null).show();
     }
 
     // ------------------------------------------------------------------ keyboard

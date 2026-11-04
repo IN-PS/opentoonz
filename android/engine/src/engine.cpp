@@ -265,7 +265,9 @@ Engine::DirtyRect Engine::pointerDown(double x, double y, double pressure) {
     return DirtyRect();
   }
   case Tool::Select:
-    return DirtyRect();  // driven by selectRect / transformSelection
+  case Tool::Shape:
+  case Tool::Transform:
+    return DirtyRect();  // driven by dedicated calls (selection/shape/keys)
   }
   return DirtyRect();
 }
@@ -797,6 +799,34 @@ void Engine::removeKey(int layer, int row) {
   int uid = layer < 0 ? -1 : m_doc->layer(layer)->uid;
   TUndoManager::manager()->add(new KeysUndo(m_doc.get(), uid, before, *k));
   m_doc->dirty = true;
+}
+
+void Engine::beginKeyEdit(int layer) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  KeyMap *k = keysOf(layer);
+  if (!k) return;
+  m_keyEditLayer  = layer;
+  m_keyEditBefore = *k;
+}
+
+void Engine::setKeyLive(int layer, int row, const Xform &xf, Ease ease) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  KeyMap *k = keysOf(layer);
+  if (!k || row < 0) return;
+  Xform f   = xf;
+  f.scale   = std::max(0.01, std::min(100.0, f.scale));
+  f.opacity = std::max(0.0, std::min(1.0, f.opacity));
+  (*k)[row] = Key{f, ease};
+  m_doc->dirty = true;
+}
+
+void Engine::endKeyEdit() {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  if (m_keyEditLayer == -2) return;
+  KeyMap *k = keysOf(m_keyEditLayer);
+  int uid   = m_keyEditLayer < 0 ? -1 : m_doc->layer(m_keyEditLayer)->uid;
+  if (k) TUndoManager::manager()->add(new KeysUndo(m_doc.get(), uid, m_keyEditBefore, *k));
+  m_keyEditLayer = -2;
 }
 
 std::vector<int> Engine::keyRows(int layer) const {
