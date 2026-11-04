@@ -152,6 +152,7 @@ int Document::addDrawing(Layer *layer, const TImageP &img) {
   std::string id      = cacheId(layer, no);
   layer->drawings[no] = id;
   TImageCache::instance()->add(id, img, true);
+  touch(layer);
   return no;
 }
 
@@ -160,6 +161,15 @@ void Document::setDrawing(Layer *layer, int drawingNo, const TImageP &img) {
   layer->drawings[drawingNo] = id;
   layer->nextDrawing         = std::max(layer->nextDrawing, drawingNo + 1);
   TImageCache::instance()->add(id, img, true);
+  touch(layer);
+}
+
+void Document::commitDrawing(Layer *layer, int drawingNo, const TImageP &img) {
+  if (!layer || !img) return;
+  auto it = layer->drawings.find(drawingNo);
+  if (it == layer->drawings.end()) return;
+  TImageCache::instance()->add(it->second, img, true);
+  touch(layer);
 }
 
 int Document::createDrawing(Layer *layer) {

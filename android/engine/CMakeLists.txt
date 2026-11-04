@@ -27,19 +27,32 @@ option(OTM_BUILD_JNI "Build the JNI bridge" ON)
 # ---------------------------------------------------------------- Qt5 Core
 # For Android pass -DQt5_DIR=<qt5-android>/lib/cmake/Qt5 and
 # -DOTM_HOST_MOC=/usr/bin/moc (or the host moc from the Qt build).
-find_package(Qt5 COMPONENTS Core REQUIRED)
+# OTM_QT_INCLUDE_DIR: compile-only check against Qt headers without a Qt
+# build for the target (static libraries only; nothing is linked).
+if(OTM_QT_INCLUDE_DIR)
+  add_library(Qt5::Core INTERFACE IMPORTED)
+  set_target_properties(Qt5::Core PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
+    "${OTM_QT_INCLUDE_DIR};${OTM_QT_INCLUDE_DIR}/QtCore;${OTM_QT_INCLUDE_DIR}/QtCore/${OTM_QT_VERSION}")
+else()
+  find_package(Qt5 COMPONENTS Core REQUIRED)
+endif()
 if(OTM_HOST_MOC)
   set(MOC_EXE ${OTM_HOST_MOC})
 else()
   get_target_property(MOC_EXE Qt5::moc IMPORTED_LOCATION)
 endif()
 
-# Boost is used header-only by tnzcore.
-find_path(BOOST_INCLUDE boost/config.hpp
-  HINTS ${OTM_BOOST_INCLUDE} /usr/include NO_CMAKE_FIND_ROOT_PATH)
-if(NOT BOOST_INCLUDE)
+# Boost is used header-only by tnzcore.  Only the boost/ directory is exposed
+# (a symlink in the build tree) so that cross builds never see host libc
+# headers that may live next to it (e.g. /usr/include).
+find_path(OTM_BOOST_INCLUDE boost/config.hpp PATHS /usr/include /usr/local/include
+  NO_CMAKE_FIND_ROOT_PATH DOC "directory containing boost/")
+if(NOT EXISTS ${OTM_BOOST_INCLUDE}/boost/config.hpp)
   message(FATAL_ERROR "Boost headers not found (set OTM_BOOST_INCLUDE)")
 endif()
+set(BOOST_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/boost-include)
+file(MAKE_DIRECTORY ${BOOST_INCLUDE})
+file(CREATE_LINK ${OTM_BOOST_INCLUDE}/boost ${BOOST_INCLUDE}/boost SYMBOLIC)
 
 # LZ4 (used by tcodec for the TLV/image cache codec): compiled from the
 # copy bundled in OpenToonz's thirdparty directory so it works on Android.
@@ -219,7 +232,7 @@ target_include_directories(otm_opentoonz PUBLIC
   ${OT_COMMON}/tcore
   ${BOOST_INCLUDE})
 target_compile_definitions(otm_opentoonz PUBLIC
-  LINUX OTM_GL_STUB OTM_NO_QTGUI OTM_NO_PREFERENCES OTM_LZO_ENV TNZ_LITTLE_ENDIAN=1 x64 QT_CORE_LIB
+  LINUX OTM_GL_STUB OTM_NO_QTGUI OTM_NO_PREFERENCES OTM_LZO_ENV OTM_NO_JPEG TNZ_LITTLE_ENDIAN=1 x64 QT_CORE_LIB
   TNZCORE_EXPORTS TCOLOR_EXPORTS TGEOMETRY_EXPORTS TRASTER_EXPORTS
   TIMAGE_EXPORTS TSYSTEM_EXPORTS TVECTORIMAGE_EXPORTS TGL_EXPORTS
   TSOUND_EXPORTS TIMAGE_IO_EXPORTS TRASTERIMAGE_EXPORTS TMETAIMAGE_EXPORTS

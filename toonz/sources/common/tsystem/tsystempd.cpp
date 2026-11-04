@@ -54,7 +54,9 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <dirent.h>
+#ifndef __ANDROID__  // not provided by bionic (dirent.h covers it)
 #include <sys/dir.h>
+#endif
 #include <sys/sysinfo.h>
 #include <sys/swap.h>
 #include <sys/statfs.h>

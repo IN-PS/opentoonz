@@ -41,3 +41,5 @@ ipch/
 
 # generated qm files
 /stuff/config/loc
+# OpenToonz Mobile build outputs
+android/out/

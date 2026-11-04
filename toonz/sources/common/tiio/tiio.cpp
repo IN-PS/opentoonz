@@ -2,7 +2,9 @@
 
 #include "tiio.h"
 
+#ifndef OTM_NO_JPEG  // OpenToonz Mobile decodes JPEG with the platform codec
 #include "tiio_jpg.h"
+#endif
 #include "tproperty.h"
 
 #include <map>

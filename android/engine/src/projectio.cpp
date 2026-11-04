@@ -16,6 +16,7 @@
 #include <QFileInfo>
 
 #include <set>
+#include <unistd.h>
 
 namespace otm {
 
@@ -61,6 +62,30 @@ TPalette *loadPalette(const std::string &path) {
   }
 }
 
+// Hard link (cheap, same filesystem) or copy.
+static bool linkOrCopy(const QString &src, const QString &dst) {
+  if (::link(src.toLocal8Bit().constData(), dst.toLocal8Bit().constData()) == 0)
+    return true;
+  return QFile::copy(src, dst);
+}
+
+// Re-uses the level files of the previous save of an unmodified layer.
+static bool reuseLevel(const QString &dir, const QString &tmp, const Layer &l,
+                       const std::string &base) {
+  QDir levels(dir + "/levels");
+  QString b = QString::fromStdString(base);
+  QStringList files =
+      l.type == LayerType::ToonzRaster
+          ? QStringList{b + ".tlv"}  // .tpl is rewritten (palette may change)
+          : levels.entryList(QStringList{b + ".*.png"}, QDir::Files);
+  if (files.isEmpty()) return false;
+  for (const QString &f : files)
+    if (!QFile::exists(levels.filePath(f))) return false;
+  for (const QString &f : files)
+    if (!linkOrCopy(levels.filePath(f), tmp + "/levels/" + f)) return false;
+  return true;
+}
+
 static bool removeRecursively(const QString &p) {
   QFileInfo fi(p);
   if (!fi.exists()) return true;
@@ -87,6 +112,14 @@ bool saveProject(Document &doc, const std::string &dirStr, std::string *error) {
       for (int d : l->cells)
         if (d > 0 && l->drawings.count(d)) used.insert(d);
       std::string base = levelBaseName(*l);
+      if (doc.savedDir == dirStr && l->savedRevision == l->revision &&
+          l->savedLevel == base && reuseLevel(dir, tmp, *l, base)) {
+        // unchanged since the last save: palette may have changed though
+        if (l->type == LayerType::ToonzRaster)
+          savePalette(doc.palette(), (tmp + "/levels/" + QString::fromStdString(base) +
+                                      ".tpl").toStdString());
+        continue;
+      }
       if (l->type == LayerType::ToonzRaster) {
         TFilePath fp = tmpFp + TFilePath("levels/" + base + ".tlv");
         if (!used.empty()) {
@@ -170,6 +203,12 @@ bool saveProject(Document &doc, const std::string &dirStr, std::string *error) {
       return fail(std::string("cannot move ") + f);
   }
   removeRecursively(tmp);
+  for (int i = 0; i < doc.layerCount(); i++) {
+    Layer *l         = doc.layer(i);
+    l->savedRevision = l->revision;
+    l->savedLevel    = levelBaseName(*l);
+  }
+  doc.savedDir = dirStr;
   return true;
 }
 
@@ -311,6 +350,12 @@ std::unique_ptr<Document> loadProject(const std::string &dirStr,
     l->nextDrawing = std::max(l->nextDrawing, r.next);
   }
   doc->setLastUid(lastUid);
+  for (int i = 0; i < doc->layerCount() && i < (int)recs.size(); i++) {
+    // files on disk are current
+    doc->layer(i)->savedRevision = doc->layer(i)->revision;
+    doc->layer(i)->savedLevel    = recs[i].level;
+  }
+  doc->savedDir = dirStr;
   if (doc->layerCount() == 0) doc->addLayer(LayerType::ToonzRaster, "Layer 1");
   doc->currentRow   = std::max(0, row);
   doc->currentLayer = std::max(0, std::min(layer, doc->layerCount() - 1));

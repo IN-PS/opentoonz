@@ -71,7 +71,7 @@ public:
     if (!l) return;
     TImageP img = m_doc->drawing(l, m_drawing, true);
     pasteTiles(rasterOf(img), set);
-    m_doc->dirty = true;
+    m_doc->commitDrawing(l, m_drawing, img);
   }
   void undo() const override { apply(m_before.get()); }
   void redo() const override { apply(m_after.get()); }
@@ -95,11 +95,11 @@ public:
       : m_doc(doc), m_uid(uid), m_before(before), m_after(after), m_label(label) {}
   void undo() const override {
     if (Layer *l = m_doc->layerByUid(m_uid)) l->cells = m_before;
-    m_doc->dirty = true;
+    m_doc->touch(m_uid);
   }
   void redo() const override {
     if (Layer *l = m_doc->layerByUid(m_uid)) l->cells = m_after;
-    m_doc->dirty = true;
+    m_doc->touch(m_uid);
   }
   int getSize() const override {
     return sizeof(*this) + (int)(m_before.size() + m_after.size()) * 4;
@@ -114,6 +114,7 @@ public:
 void pushCellsUndo(Document *doc, Layer *layer, const std::vector<int> &before,
                    const std::string &label) {
   if (before == layer->cells) return;
+  doc->touch(layer);
   TUndoManager::manager()->add(
       new CellsUndo(doc, layer->uid, before, layer->cells, label));
 }
@@ -165,7 +166,7 @@ void RasterChange::commit(const std::string &label) {
       after, label));
   m_cmSaver.reset();
   m_fcSaver.reset();
-  m_doc->dirty = true;
+  m_doc->commitDrawing(m_doc->layerByUid(m_layerUid), m_drawing, m_img);
 }
 
 //=============================================================================
@@ -333,7 +334,7 @@ TRect fillAt(Document *doc, const ToolSettings &s, const TPointD &p) {
       ti->setSavebox((ti->getSavebox() + dirty) * ras->getBounds());
       TUndoManager::manager()->add(new RasterTilesUndo(
           doc, layer->uid, drawing, before, after, "Fill"));
-      doc->dirty = true;
+      doc->commitDrawing(layer, drawing, img);
     } else
       delete before;
   } else if (TRasterImageP ri = img) {
@@ -351,7 +352,7 @@ TRect fillAt(Document *doc, const ToolSettings &s, const TPointD &p) {
       dirty = before->getBBox();
       TUndoManager::manager()->add(new RasterTilesUndo(
           doc, layer->uid, drawing, before, after, "Fill"));
-      doc->dirty = true;
+      doc->commitDrawing(layer, drawing, img);
     } else
       delete before;
   }
@@ -460,6 +461,7 @@ TRect Selection::cancel() {
   if (!m_active) return TRect();
   m_active = false;
   rasterOf(m_img)->copy(rasterOf(m_floating), m_rect.getP00());
+  m_doc->commitDrawing(m_doc->layerByUid(m_layerUid), m_drawing, m_img);
   m_change.reset();
   m_floating = TImageP();
   return m_rect;

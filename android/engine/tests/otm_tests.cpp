@@ -18,6 +18,7 @@
 #include <QDir>
 
 #include <chrono>
+#include <thread>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -477,9 +478,21 @@ static void testSaveLoad(Engine &e) {
   CHECK(e.save(dir, &err));
   CHECK(!e.doc()->dirty);
   Img edited = render(e, 1);
+  int editedLayer = e.doc()->currentLayer;
+  int editedCell  = e.doc()->layer(editedLayer)->cell(1);
   e.newDocument(100, 100, 12);
   CHECK(e.load(dir, &err));
-  CHECK(sameImg(edited, render(e, 1)));
+  bool same = sameImg(edited, render(e, 1));
+  CHECK(same);
+  if (!same) {
+    printf("  DIAG edited layer %d cell %d -> reloaded cell %d, cur layer %d\n",
+           editedLayer, editedCell, e.doc()->layer(editedLayer)->cell(1),
+           e.doc()->currentLayer);
+    QDir lv2(QString::fromStdString(dir + "/levels"));
+    for (auto &f : lv2.entryInfoList(QDir::Files))
+      printf("  DIAG file %s %lld\n", f.fileName().toStdString().c_str(),
+             (long long)f.size());
+  }
   // corrupted project is reported, not crashing
   {
     std::ofstream bad(g_out + "/badproj/project.otm");
@@ -488,6 +501,34 @@ static void testSaveLoad(Engine &e) {
   { std::ofstream bad(g_out + "/badproj/project.otm"); bad << "garbage"; }
   CHECK(!e.load(g_out + "/badproj", &err));
   printf("  bad project -> \"%s\"\n", err.c_str());
+}
+
+// The Android app saves on a background executor thread while the UI thread
+// keeps using the engine; QProcess (LZO helpers for TLV) must work there too.
+static void testWorkerThreadSave(Engine &e) {
+  section("save/load from a worker thread (Android autosave path)");
+  e.newDocument(320, 240, 12);
+  e.tool = Tool::Brush;
+  stroke(e, circle(160, 120, 50));
+  e.insertBlankFrame();
+  stroke(e, line(10, 10, 300, 200));
+  std::string err1, err2;
+  bool ok1 = false, ok2 = false;
+  std::string dir = g_out + "/threadproj";
+  std::thread t([&] { ok1 = e.save(dir, &err1); });
+  // UI thread keeps drawing meanwhile (serialised by the engine mutex)
+  stroke(e, line(10, 200, 300, 10));
+  t.join();
+  CHECK(ok1);
+  if (!ok1) printf("  worker save error: %s\n", err1.c_str());
+  std::thread t2([&] { ok2 = e.save(dir, &err2); });
+  t2.join();
+  CHECK(ok2);
+  Img a = render(e, 1);
+  e.newDocument(64, 64, 12);
+  std::thread t3([&] { ok1 = e.load(dir, &err1); });
+  t3.join();
+  CHECK(ok1 && sameImg(a, render(e, 1)));
 }
 
 static void testExport(Engine &e) {
@@ -551,11 +592,27 @@ static void testMemoryAndPerf(Engine &e) {
   std::string err;
   t0 = nowMs();
   CHECK(e.save(g_out + "/bigproject", &err));
-  printf("  save 120 frames: %.0f ms\n", nowMs() - t0);
+  printf("  save 120 frames (full): %.0f ms\n", nowMs() - t0);
+  // incremental save: only the modified level is re-encoded
+  e.addLayer();
+  stroke(e, line(10, 10, 600, 300));
+  t0 = nowMs();
+  CHECK(e.save(g_out + "/bigproject", &err));
+  double inc = nowMs() - t0;
+  printf("  save after editing 1 frame of a new layer (incremental): %.0f ms\n", inc);
+  t0 = nowMs();
+  CHECK(e.save(g_out + "/bigproject", &err));
+  printf("  save with no level changes: %.0f ms\n", nowMs() - t0);
   t0 = nowMs();
   CHECK(e.load(g_out + "/bigproject", &err));
   printf("  load 120 frames: %.0f ms\n", nowMs() - t0);
   CHECK(e.doc()->frameCount() == 120);
+  CHECK(e.doc()->layerCount() == 2);
+  // the reused (hard-linked) 120-frame TLV is intact after the swaps
+  bool ok = true;
+  Layer *l0 = e.doc()->layer(0);
+  for (int r = 0; r < 120; r += 17) ok = ok && e.doc()->image(l0, r);
+  CHECK(ok);
 }
 
 static void testGifQuantizer() {
@@ -594,6 +651,7 @@ int main(int argc, char **argv) {
   testUndoRedo(e);
   testImport(e);
   testSaveLoad(e);
+  testWorkerThreadSave(e);
   testExport(e);
   testGifQuantizer();
   testMemoryAndPerf(e);

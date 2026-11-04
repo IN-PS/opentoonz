@@ -39,6 +39,11 @@ public:
   std::map<int, std::string> drawings;  // drawing number -> TImageCache id
   int nextDrawing = 1;
 
+  // incremental save: content revision vs. revision written to disk
+  int revision      = 1;
+  int savedRevision = 0;
+  std::string savedLevel;  // level base name of the last save
+
   int cell(int row) const {
     return (row >= 0 && row < (int)cells.size()) ? cells[row] : 0;
   }
@@ -118,6 +123,18 @@ public:
   OnionSettings onion;
   bool dirty         = false;
   std::string name   = "Untitled";
+  std::string savedDir;  // directory of the last save/load (incremental save)
+
+  //! Marks the level content of a layer as modified (pixels or cells).
+  void touch(Layer *layer) {
+    if (layer) layer->revision++;
+    dirty = true;
+  }
+  void touch(int layerUid) { touch(layerByUid(layerUid)); }
+  //! Must be called after pixels of a drawing obtained with toBeModified=true
+  //! were changed: TImageCache may have compressed/evicted the entry in the
+  //! meantime (memory pressure), so the live image is registered again.
+  void commitDrawing(Layer *layer, int drawingNo, const TImageP &img);
 
   std::string cacheId(const Layer *layer, int drawingNo) const;
   int docId() const { return m_docId; }
