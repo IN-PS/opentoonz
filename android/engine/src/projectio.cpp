@@ -20,7 +20,23 @@
 
 namespace otm {
 
-static const int kFormatVersion = 1;
+static const int kFormatVersion = 2;  // 2: transform keyframes
+
+static void writeKeys(TOStream &os, const KeyMap &keys) {
+  for (auto &k : keys)
+    os << k.first << k.second.xf.x << k.second.xf.y << k.second.xf.rot
+       << k.second.xf.scale << k.second.xf.opacity << (int)k.second.ease;
+}
+
+static void readKeys(TIStream &is, KeyMap &keys) {
+  while (!is.eos()) {
+    int row, ease;
+    Key k;
+    is >> row >> k.xf.x >> k.xf.y >> k.xf.rot >> k.xf.scale >> k.xf.opacity >> ease;
+    k.ease    = (Ease)std::max(0, std::min(2, ease));
+    keys[row] = k;
+  }
+}
 
 static std::string levelBaseName(const Layer &l) {
   std::string safe;
@@ -163,6 +179,11 @@ bool saveProject(Document &doc, const std::string &dirStr, std::string *error) {
          << doc.onion.opacity << (int)doc.onion.tint;
       os.closeChild();
       os.child("lastUid") << doc.lastUid();
+      if (!doc.cameraKeys.empty()) {
+        os.openChild("camera");
+        writeKeys(os, doc.cameraKeys);
+        os.closeChild();
+      }
       os.openChild("layers");
       for (int i = 0; i < doc.layerCount(); i++) {
         Layer *l = doc.layer(i);
@@ -178,6 +199,11 @@ bool saveProject(Document &doc, const std::string &dirStr, std::string *error) {
         os.openChild("cells");
         for (int c : l->cells) os << c;
         os.closeChild();
+        if (!l->keys.empty()) {
+          os.openChild("keys");
+          writeKeys(os, l->keys);
+          os.closeChild();
+        }
         os.closeChild();
       }
       os.closeChild();
@@ -229,7 +255,9 @@ std::unique_ptr<Document> loadProject(const std::string &dirStr,
     std::string type, name, level;
     int visible = 1, locked = 0, opacity = 255, next = 1;
     std::vector<int> cells;
+    KeyMap keys;
   };
+  KeyMap cameraKeys;
   std::vector<LayerRec> recs;
   int w = 960, h = 540, fps = 12, minFrames = 1, row = 0, layer = 0, style = 1;
   int onion[5] = {0, 2, 1, 110, 1};
@@ -250,6 +278,8 @@ std::unique_ptr<Document> loadProject(const std::string &dirStr,
         for (int &v : onion) is >> v;
       else if (tag == "lastUid")
         is >> lastUid;
+      else if (tag == "camera")
+        readKeys(is, cameraKeys);
       else if (tag == "name")
         is >> name;
       else if (tag == "layers") {
@@ -267,6 +297,8 @@ std::unique_ptr<Document> loadProject(const std::string &dirStr,
               is >> r.name;
             else if (tag == "level")
               is >> r.level;
+            else if (tag == "keys")
+              readKeys(is, r.keys);
             else if (tag == "flags")
               is >> r.visible >> r.locked >> r.opacity >> r.next;
             else if (tag == "cells")
@@ -309,6 +341,7 @@ std::unique_ptr<Document> loadProject(const std::string &dirStr,
     l->locked  = r.locked != 0;
     l->opacity = r.opacity;
     l->cells   = r.cells;
+    l->keys    = r.keys;
     std::set<int> used(r.cells.begin(), r.cells.end());
     used.erase(0);
     try {
@@ -350,6 +383,7 @@ std::unique_ptr<Document> loadProject(const std::string &dirStr,
     l->nextDrawing = std::max(l->nextDrawing, r.next);
   }
   doc->setLastUid(lastUid);
+  doc->cameraKeys = cameraKeys;
   for (int i = 0; i < doc->layerCount() && i < (int)recs.size(); i++) {
     // files on disk are current
     doc->layer(i)->savedRevision = doc->layer(i)->revision;

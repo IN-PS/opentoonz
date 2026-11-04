@@ -16,6 +16,9 @@
 #include "tpalette.h"
 #include "traster.h"
 #include "trastercm.h"
+#include "tgeometry.h"
+
+#include <cmath>
 
 #include <map>
 #include <memory>
@@ -25,6 +28,25 @@
 namespace otm {
 
 enum class LayerType { ToonzRaster = 0, Raster = 1 };
+
+//! Animatable transform (OpenToonz "peg"-like). Canvas units: x/y pixels
+//! (y down), rotation degrees clockwise, uniform scale, opacity 0..1.
+struct Xform {
+  double x = 0, y = 0, rot = 0, scale = 1, opacity = 1;
+  bool isIdentity() const {
+    return std::abs(x) < 1e-6 && std::abs(y) < 1e-6 && std::abs(rot) < 1e-6 &&
+           std::abs(scale - 1) < 1e-6;
+  }
+};
+enum class Ease { Linear = 0, EaseInOut = 1, Constant = 2 };
+struct Key {
+  Xform xf;
+  Ease ease = Ease::EaseInOut;  // interpolation towards the next key
+};
+using KeyMap = std::map<int, Key>;  // row -> key
+
+//! Interpolated transform at a row (identity when there are no keys).
+Xform xformAt(const KeyMap &keys, int row);
 
 class Layer {
 public:
@@ -36,6 +58,7 @@ public:
   int opacity    = 255;  // 0..255
 
   std::vector<int> cells;           // row -> drawing number (0 = empty)
+  KeyMap keys;                      // transform animation
   std::map<int, std::string> drawings;  // drawing number -> TImageCache id
   int nextDrawing = 1;
 
@@ -123,7 +146,13 @@ public:
   OnionSettings onion;
   bool dirty         = false;
   std::string name   = "Untitled";
-  std::string savedDir;  // directory of the last save/load (incremental save)
+  std::string savedDir;
+  KeyMap cameraKeys;  // camera animation: pan (x,y), rotation, zoom (scale)
+
+  //! Raster-space affine of a layer at a row, including the camera
+  //! (layer -> output).  Identity when nothing is animated.
+  TAffine layerAffine(const Layer *layer, int row) const;
+  double layerOpacity(const Layer *layer, int row) const;  // directory of the last save/load (incremental save)
 
   //! Marks the level content of a layer as modified (pixels or cells).
   void touch(Layer *layer) {

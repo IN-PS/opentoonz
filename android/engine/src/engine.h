@@ -60,6 +60,10 @@ public:
 
   Selection &selection() { return *m_selection; }
   bool selectRect(int x0, int y0, int x1, int y1);  // canvas coords
+  //! Lasso selection; polygon in canvas coords.
+  bool selectPolygon(const std::vector<std::pair<double, double>> &pts);
+  //! Line / rectangle / ellipse with the current brush (canvas coords).
+  DirtyRect drawShape(int type, double x0, double y0, double x1, double y1);
   void transformSelection(double dx, double dy, double scale, double angle);
   DirtyRect commitSelection();
   DirtyRect cancelSelection();
@@ -109,7 +113,26 @@ public:
   std::recursive_mutex &mutex() { return m_mutex; }
   unsigned memoryKB() const;  //!< process resident memory (VmRSS)
 
+  // keyframes (layer index, or -1 for the camera) --------------------
+  Xform xformAt(int layer, int row) const;
+  bool hasKey(int layer, int row) const;
+  void setKey(int layer, int row, const Xform &xf, Ease ease);
+  void removeKey(int layer, int row);
+  std::vector<int> keyRows(int layer) const;
+  Ease keyEase(int layer, int row) const;
+
+  // timing ---------------------------------------------------------------
+  //! Re-times the current layer so that every drawing is exposed \b step
+  //! frames ("animate on ones / twos / threes").
+  void reframe(int step);
+  //! Sets how many frames the drawing at the current row is exposed.
+  void setExposure(int frames);
+
 private:
+  KeyMap *keysOf(int layer) const;
+  TAffine curAff() const;
+  TPointD toLayer(double x, double y) const;
+  DirtyRect layerToCanvas(const TRect &r) const;
   TPointD toRaster(double x, double y) const;
   DirtyRect toCanvas(const TRect &r) const;
 

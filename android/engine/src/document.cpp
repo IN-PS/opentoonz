@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <atomic>
 #include <set>
+#include <cstdio>
+#include <cstdlib>
 
 namespace otm {
 
@@ -24,6 +26,59 @@ void Layer::setCell(int row, int drawing) {
 }
 
 int Layer::usedRows() const { return (int)cells.size(); }
+
+//-----------------------------------------------------------------------------
+
+Xform xformAt(const KeyMap &keys, int row) {
+  if (keys.empty()) return Xform();
+  auto hi = keys.lower_bound(row);
+  if (hi != keys.end() && hi->first == row) return hi->second.xf;
+  if (hi == keys.begin()) return hi->second.xf;
+  auto lo = std::prev(hi);
+  if (hi == keys.end()) return lo->second.xf;
+  double t = double(row - lo->first) / double(hi->first - lo->first);
+  switch (lo->second.ease) {
+  case Ease::Constant: t = 0; break;
+  case Ease::EaseInOut: t = t * t * (3 - 2 * t); break;
+  default: break;
+  }
+  const Xform &a = lo->second.xf, &b = hi->second.xf;
+  Xform r;
+  r.x       = a.x + (b.x - a.x) * t;
+  r.y       = a.y + (b.y - a.y) * t;
+  r.rot     = a.rot + (b.rot - a.rot) * t;
+  r.scale   = a.scale + (b.scale - a.scale) * t;
+  r.opacity = a.opacity + (b.opacity - a.opacity) * t;
+  return r;
+}
+
+// Canvas convention -> OpenToonz raster space (y up): pivot = canvas centre.
+static TAffine xformAffine(const Xform &f, const TDimension &sz) {
+  TPointD c(sz.lx * 0.5, sz.ly * 0.5);
+  return TTranslation(c + TPointD(f.x, -f.y)) * TRotation(-f.rot) *
+         TScale(f.scale) * TTranslation(-c);
+}
+
+TAffine Document::layerAffine(const Layer *layer, int row) const {
+  TAffine a;
+  if (layer && !layer->keys.empty()) a = xformAffine(xformAt(layer->keys, row), size());
+  if (!cameraKeys.empty()) {
+    // the camera frames the scene: the view is the inverse of its placement
+    Xform cam = xformAt(cameraKeys, row);
+    cam.scale = cam.scale > 1e-3 ? 1.0 / cam.scale : 1.0;  // stored as zoom
+    TPointD c(m_w * 0.5, m_h * 0.5);
+    TAffine view = TTranslation(c) * TScale(1.0 / cam.scale) * TRotation(cam.rot) *
+                   TTranslation(-c - TPointD(cam.x, -cam.y));
+    a = view * a;
+  }
+  return a;
+}
+
+double Document::layerOpacity(const Layer *layer, int row) const {
+  double o = layer ? layer->opacity / 255.0 : 1.0;
+  if (layer && !layer->keys.empty()) o *= xformAt(layer->keys, row).opacity;
+  return std::max(0.0, std::min(1.0, o));
+}
 
 //-----------------------------------------------------------------------------
 

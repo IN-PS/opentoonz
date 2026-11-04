@@ -242,7 +242,7 @@ void Engine::renderScaledRGBA(int row, uint8_t *dst, int w, int h, int stride,
 
 Engine::DirtyRect Engine::pointerDown(double x, double y, double pressure) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
-  TPointD p = toRaster(x, y);
+  TPointD p = toLayer(x, y);
   switch (tool) {
   case Tool::Brush:
   case Tool::Eraser: {
@@ -253,11 +253,11 @@ Engine::DirtyRect Engine::pointerDown(double x, double y, double pressure) {
       m_stroke.reset();
       return DirtyRect();
     }
-    return toCanvas(r);
+    return layerToCanvas(r);
   }
   case Tool::Fill: {
     if (m_selection->active()) commitSelection();
-    return toCanvas(fillAt(m_doc.get(), settings, p));
+    return layerToCanvas(fillAt(m_doc.get(), settings, p));
   }
   case Tool::Picker: {
     m_picked = pickStyleAt(m_doc.get(), p);
@@ -273,50 +273,98 @@ Engine::DirtyRect Engine::pointerDown(double x, double y, double pressure) {
 Engine::DirtyRect Engine::pointerMove(double x, double y, double pressure) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
   if (!m_stroke) return DirtyRect();
-  return toCanvas(m_stroke->move(toRaster(x, y), pressure));
+  return layerToCanvas(m_stroke->move(toLayer(x, y), pressure));
 }
 
 Engine::DirtyRect Engine::pointerUp(double x, double y, double pressure) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
   if (!m_stroke) return DirtyRect();
-  TRect r = m_stroke->end(toRaster(x, y), pressure);
+  TRect r = m_stroke->end(toLayer(x, y), pressure);
   m_stroke.reset();
-  return toCanvas(r);
+  return layerToCanvas(r);
 }
 
 bool Engine::selectRect(int x0, int y0, int x1, int y1) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
-  int h = m_doc->height();
   if (x1 < x0) std::swap(x0, x1);
   if (y1 < y0) std::swap(y0, y1);
+  if (!curAff().isIdentity())
+    return selectPolygon({{(double)x0, (double)y0}, {(double)x1 + 1, (double)y0},
+                          {(double)x1 + 1, (double)y1 + 1}, {(double)x0, (double)y1 + 1}});
+  int h = m_doc->height();
   return m_selection->lift(TRect(x0, h - 1 - y1, x1, h - 1 - y0));
+}
+
+bool Engine::selectPolygon(const std::vector<std::pair<double, double>> &pts) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  std::vector<TPointD> poly;
+  for (auto &p : pts) poly.push_back(toLayer(p.first, p.second));
+  return m_selection->liftPolygon(poly);
+}
+
+Engine::DirtyRect Engine::drawShape(int type, double x0, double y0, double x1,
+                                    double y1) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  if (m_selection->active()) commitSelection();
+  auto pts = shapePoints((ShapeType)type, toLayer(x0, y0), toLayer(x1, y1));
+  if (pts.size() < 2) return DirtyRect();
+  ToolSettings s = settings;
+  s.stabilizer   = 0;
+  s.pressure     = false;
+  StrokeSession st(m_doc.get(), s, Tool::Brush);
+  TRect r = st.begin(pts[0], 1.0);
+  if (!st.valid()) return DirtyRect();
+  for (size_t i = 1; i + 1 < pts.size(); i++) r += st.move(pts[i], 1.0);
+  r += st.end(pts.back(), 1.0);
+  return layerToCanvas(r);
+}
+
+TAffine Engine::curAff() const {
+  return m_doc->layerAffine(m_doc->layer(m_doc->currentLayer), m_doc->currentRow);
+}
+
+TPointD Engine::toLayer(double x, double y) const {
+  TAffine a = curAff();
+  TPointD p = toRaster(x, y);
+  return a.isIdentity() ? p : a.inv() * p;
+}
+
+Engine::DirtyRect Engine::layerToCanvas(const TRect &r) const {
+  TAffine a = curAff();
+  if (a.isIdentity() || r.isEmpty()) return toCanvas(r);
+  TRectD b = a * TRectD(r.x0, r.y0, r.x1 + 1, r.y1 + 1);
+  return toCanvas(TRect(tfloor(b.x0) - 1, tfloor(b.y0) - 1, tceil(b.x1) + 1,
+                        tceil(b.y1) + 1));
 }
 
 void Engine::transformSelection(double dx, double dy, double scale,
                                 double angle) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
-  // canvas y-down -> raster y-up; canvas clockwise angle -> raster ccw
-  m_selection->setTransform(dx, -dy, scale, -angle);
+  // canvas y-down -> raster y-up; canvas clockwise angle -> raster ccw;
+  // the drag vector is expressed in the (possibly animated) layer space
+  TAffine inv = curAff().inv();
+  TPointD d   = inv * TPointD(dx, -dy) - inv * TPointD(0, 0);
+  m_selection->setTransform(d.x, d.y, scale, -angle);
 }
 
 Engine::DirtyRect Engine::commitSelection() {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
-  return toCanvas(m_selection->commit());
+  return layerToCanvas(m_selection->commit());
 }
 Engine::DirtyRect Engine::cancelSelection() {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
-  return toCanvas(m_selection->cancel());
+  return layerToCanvas(m_selection->cancel());
 }
 Engine::DirtyRect Engine::deleteSelection() {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
-  return toCanvas(m_selection->erase());
+  return layerToCanvas(m_selection->erase());
 }
 
 Engine::DirtyRect Engine::selectionBounds() const {
   if (!m_selection->active()) return DirtyRect();
   TRectD b = m_selection->bounds();
-  return toCanvas(TRect(tfloor(b.x0), tfloor(b.y0), tceil(b.x1) - 1,
-                        tceil(b.y1) - 1));
+  return layerToCanvas(TRect(tfloor(b.x0), tfloor(b.y0), tceil(b.x1) - 1,
+                             tceil(b.y1) - 1));
 }
 
 //-----------------------------------------------------------------------------
@@ -675,6 +723,122 @@ unsigned Engine::memoryKB() const {
     if (sscanf(line, "VmRSS: %u kB", &kb) == 1) break;
   fclose(f);
   return kb;
+}
+
+//-----------------------------------------------------------------------------
+// keyframes
+
+namespace {
+class KeysUndo final : public TUndo {
+  Document *m_doc;
+  int m_uid;  // -1 = camera
+  KeyMap m_before, m_after;
+
+public:
+  KeysUndo(Document *d, int uid, const KeyMap &b, const KeyMap &a)
+      : m_doc(d), m_uid(uid), m_before(b), m_after(a) {}
+  void set(const KeyMap &k) const {
+    if (m_uid < 0)
+      m_doc->cameraKeys = k;
+    else if (Layer *l = m_doc->layerByUid(m_uid))
+      l->keys = k;
+    m_doc->dirty = true;
+  }
+  void undo() const override { set(m_before); }
+  void redo() const override { set(m_after); }
+  int getSize() const override {
+    return sizeof(*this) + (int)(m_before.size() + m_after.size()) * 64;
+  }
+};
+}  // namespace
+
+KeyMap *Engine::keysOf(int layer) const {
+  if (layer < 0) return &m_doc->cameraKeys;
+  Layer *l = m_doc->layer(layer);
+  return l ? &l->keys : nullptr;
+}
+
+Xform Engine::xformAt(int layer, int row) const {
+  KeyMap *k = keysOf(layer);
+  return k ? otm::xformAt(*k, row) : Xform();
+}
+
+bool Engine::hasKey(int layer, int row) const {
+  KeyMap *k = keysOf(layer);
+  return k && k->count(row);
+}
+
+Ease Engine::keyEase(int layer, int row) const {
+  KeyMap *k = keysOf(layer);
+  if (!k || !k->count(row)) return Ease::EaseInOut;
+  return k->at(row).ease;
+}
+
+void Engine::setKey(int layer, int row, const Xform &xf, Ease ease) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  KeyMap *k = keysOf(layer);
+  if (!k || row < 0) return;
+  KeyMap before = *k;
+  Xform f       = xf;
+  f.scale       = std::max(0.01, std::min(100.0, f.scale));
+  f.opacity     = std::max(0.0, std::min(1.0, f.opacity));
+  (*k)[row]     = Key{f, ease};
+  int uid       = layer < 0 ? -1 : m_doc->layer(layer)->uid;
+  TUndoManager::manager()->add(new KeysUndo(m_doc.get(), uid, before, *k));
+  m_doc->dirty = true;
+}
+
+void Engine::removeKey(int layer, int row) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  KeyMap *k = keysOf(layer);
+  if (!k || !k->count(row)) return;
+  KeyMap before = *k;
+  k->erase(row);
+  int uid = layer < 0 ? -1 : m_doc->layer(layer)->uid;
+  TUndoManager::manager()->add(new KeysUndo(m_doc.get(), uid, before, *k));
+  m_doc->dirty = true;
+}
+
+std::vector<int> Engine::keyRows(int layer) const {
+  std::vector<int> r;
+  if (KeyMap *k = keysOf(layer))
+    for (auto &e : *k) r.push_back(e.first);
+  return r;
+}
+
+//-----------------------------------------------------------------------------
+// timing
+
+void Engine::reframe(int step) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  Layer *l = currentLayerOf(m_doc.get());
+  if (!l || l->locked || step < 1 || step > 12) return;
+  auto before = l->cells;
+  std::vector<int> runs;  // distinct consecutive drawings (0 = blank run)
+  for (size_t i = 0; i < l->cells.size(); i++)
+    if (i == 0 || l->cells[i] != l->cells[i - 1]) runs.push_back(l->cells[i]);
+  std::vector<int> out;
+  for (int d : runs) out.insert(out.end(), step, d);
+  while (!out.empty() && out.back() == 0) out.pop_back();
+  l->cells = out;
+  pushCellsUndo(m_doc.get(), l, before, "Reframe");
+}
+
+void Engine::setExposure(int frames) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  Layer *l = currentLayerOf(m_doc.get());
+  int row  = m_doc->currentRow;
+  if (!l || l->locked || frames < 1 || row >= (int)l->cells.size()) return;
+  int d = l->cells[row];
+  if (d == 0) return;
+  int start = row, end = row;
+  while (start > 0 && l->cells[start - 1] == d) start--;
+  while (end + 1 < (int)l->cells.size() && l->cells[end + 1] == d) end++;
+  auto before = l->cells;
+  l->cells.erase(l->cells.begin() + start, l->cells.begin() + end + 1);
+  l->cells.insert(l->cells.begin() + start, frames, d);
+  pushCellsUndo(m_doc.get(), l, before, "Exposure");
+  m_doc->currentRow = start;
 }
 
 }  // namespace otm

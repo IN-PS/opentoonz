@@ -11,7 +11,9 @@
 #include "ttoonzimage.h"
 #include "tundo.h"
 
+#include <algorithm>
 #include <cmath>
+#include "tcolorstyles.h"
 
 namespace otm {
 
@@ -196,9 +198,23 @@ TRect StrokeSession::begin(const TPointD &p, double pressure) {
   if (!m_img) return TRect();
   m_change.reset(new RasterChange(m_doc, m_layer, m_drawing, m_img));
   m_valid = true;
+  m_sp         = p;
+  m_spPressure = pressure;
 
   TThickPoint tp(p, std::max(1.0, thickness(pressure)));
   int style = m_doc->currentStyle;
+  m_softMode = soft();
+  if (m_softMode) {
+    TRasterP ras = rasterOf(m_img);
+    m_cov        = TRasterGR8P(ras->getSize());
+    m_cov->clear();
+    m_backup   = ras->clone();
+    m_lastSoft = tp;
+    TRect r    = stampSegment(tp, tp, true);
+    applySoft(r);
+    m_total += r;
+    return r;
+  }
   if (TToonzImageP ti = m_img) {
     TRasterCM32P ras = ti->getRaster();
     if (m_tool == Tool::Brush) {
@@ -263,17 +279,157 @@ TRect StrokeSession::paintPiece(bool last) {
   return r;
 }
 
+// Stabilizer: exponential smoothing of the input (lazy brush).
+TThickPoint StrokeSession::smooth(const TPointD &p, double pressure) {
+  double k = 1.0 / (1.0 + 1.5 * std::max(0, std::min(10, m_s.stabilizer)));
+  m_sp         = m_sp + (p - m_sp) * k;
+  m_spPressure = m_spPressure + (pressure - m_spPressure) * k;
+  return TThickPoint(m_sp, std::max(1.0, thickness(m_spPressure)));
+}
+
 TRect StrokeSession::move(const TPointD &p, double pressure) {
   if (!m_valid) return TRect();
-  m_gen->add(TThickPoint(p, std::max(1.0, thickness(pressure))));
+  TThickPoint tp = smooth(p, pressure);
+  if (m_softMode) {
+    TRect r    = stampSegment(m_lastSoft, tp, false);
+    m_lastSoft = tp;
+    applySoft(r);
+    m_total += r;
+    return r;
+  }
+  m_gen->add(tp);
   return paintPiece(false);
+}
+
+bool StrokeSession::soft() const {
+  if (m_tool == Tool::Eraser) return m_s.eraserHardness < 100;
+  return m_s.hardness < 100 || m_s.opacity < 100;
+}
+
+static inline double softFalloff(double d, double r, double hard) {
+  if (hard >= 0.999) return std::max(0.0, std::min(1.0, r - d + 0.5));
+  double inner = r * hard;
+  if (d <= inner) return 1.0;
+  if (d >= r) return 0.0;
+  double t = (d - inner) / (r - inner);
+  return 1.0 - t * t * (3 - 2 * t);
+}
+
+// Stamps discs along a->b into the per-stroke coverage buffer (max blend,
+// so overlapping stamps do not build up: uniform stroke opacity).
+TRect StrokeSession::stampSegment(const TThickPoint &a, const TThickPoint &b,
+                                  bool first) {
+  bool eraser   = m_tool == Tool::Eraser;
+  double hard   = (eraser ? m_s.eraserHardness : m_s.hardness) / 100.0;
+  double opac   = eraser ? 1.0 : m_s.opacity / 100.0;
+  double len    = tdistance(TPointD(a.x, a.y), TPointD(b.x, b.y));
+  double rmin   = std::max(0.5, std::min(a.thick, b.thick) * 0.5);
+  double step   = std::max(0.5, rmin * 0.15);
+  int n         = std::max(1, (int)std::ceil(len / step));
+  TRect bounds  = m_cov->getBounds(), dirty;
+  for (int i = first ? 0 : 1; i <= n; i++) {
+    double t = (double)i / n;
+    double x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t;
+    double r = std::max(0.5, (a.thick + (b.thick - a.thick) * t) * 0.5);
+    TRect sr(tfloor(x - r - 1), tfloor(y - r - 1), tceil(x + r + 1),
+             tceil(y + r + 1));
+    sr = sr * bounds;
+    if (sr.isEmpty()) continue;
+    for (int py = sr.y0; py <= sr.y1; py++) {
+      TPixelGR8 *c = m_cov->pixels(py) + sr.x0;
+      for (int px = sr.x0; px <= sr.x1; px++, c++) {
+        double d = std::hypot(px + 0.5 - x, py + 0.5 - y);
+        int v    = (int)(opac * softFalloff(d, r, hard) * 255 + 0.5);
+        if (v > c->value) c->value = v;
+      }
+    }
+    dirty += sr;
+  }
+  return dirty;
+}
+
+// Recomputes the drawing inside r from the pre-stroke backup + coverage.
+void StrokeSession::applySoft(const TRect &r) {
+  if (r.isEmpty()) return;
+  m_change->save(r);
+  bool eraser = m_tool == Tool::Eraser;
+  int style   = m_doc->currentStyle;
+  if (TToonzImageP ti = m_img) {
+    TRasterCM32P ras = ti->getRaster(), bak = m_backup;
+    bool lines = m_s.eraseMode != EraseMode::Areas;
+    bool areas = m_s.eraseMode != EraseMode::Lines;
+    for (int y = r.y0; y <= r.y1; y++) {
+      TPixelCM32 *d       = ras->pixels(y) + r.x0;
+      const TPixelCM32 *o = bak->pixels(y) + r.x0;
+      const TPixelGR8 *c  = m_cov->pixels(y) + r.x0;
+      for (int x = r.x0; x <= r.x1; x++, d++, o++, c++) {
+        int cv = c->value;
+        if (!cv) {
+          *d = *o;
+          continue;
+        }
+        int inkA = 255 - o->getTone();
+        if (eraser) {
+          int ink = o->getInk(), paint = o->getPaint(), a = inkA;
+          if (lines) a = a * (255 - cv) / 255;
+          if (areas && cv > 127) paint = 0;
+          *d = TPixelCM32(a ? ink : 0, paint, 255 - a);
+        } else if (o->getInk() == style || inkA == 0) {
+          int a = inkA + cv * (255 - inkA) / 255;  // same ink: "over"
+          *d    = TPixelCM32(style, o->getPaint(), 255 - a);
+        } else if (cv > inkA) {  // CM32 holds one ink per pixel: strongest wins
+          *d = TPixelCM32(style, o->getPaint(), 255 - cv);
+        } else
+          *d = *o;
+      }
+    }
+  } else {
+    TRaster32P ras = rasterOf(m_img), bak = m_backup;
+    TPixel32 col   = m_doc->palette()->getStyle(style)->getMainColor();
+    for (int y = r.y0; y <= r.y1; y++) {
+      TPixel32 *d       = ras->pixels(y) + r.x0;
+      const TPixel32 *o = bak->pixels(y) + r.x0;
+      const TPixelGR8 *c = m_cov->pixels(y) + r.x0;
+      for (int x = r.x0; x <= r.x1; x++, d++, o++, c++) {
+        int cv = c->value * col.m / 255;
+        if (eraser) {
+          int k = 255 - c->value;
+          *d    = TPixel32(o->r * k / 255, o->g * k / 255, o->b * k / 255,
+                           o->m * k / 255);
+        } else {  // premultiplied "over"
+          int k = 255 - cv;
+          *d    = TPixel32(col.r * cv / 255 + o->r * k / 255,
+                           col.g * cv / 255 + o->g * k / 255,
+                           col.b * cv / 255 + o->b * k / 255, cv + o->m * k / 255);
+        }
+      }
+    }
+  }
 }
 
 TRect StrokeSession::end(const TPointD &p, double pressure) {
   if (!m_valid) return TRect();
-  // last piece, closing the stroke (as the desktop tools do on button up)
-  m_gen->add(TThickPoint(p, std::max(1.0, thickness(pressure))));
-  paintPiece(true);
+  // stabilizer catch-up so the stroke ends where the pointer was released
+  std::vector<TThickPoint> tail;
+  if (m_s.stabilizer > 0)
+    for (int i = 0; i < 6 && tdistance(m_sp, p) > 0.5; i++) tail.push_back(smooth(p, pressure));
+  tail.push_back(TThickPoint(p, std::max(1.0, thickness(pressure))));
+  if (m_softMode) {
+    for (auto &tp : tail) {
+      TRect r    = stampSegment(m_lastSoft, tp, false);
+      m_lastSoft = tp;
+      applySoft(r);
+      m_total += r;
+    }
+  } else {
+    for (size_t i = 0; i + 1 < tail.size(); i++) {
+      m_gen->add(tail[i]);
+      paintPiece(false);
+    }
+    // last piece, closing the stroke (as the desktop tools do on button up)
+    m_gen->add(tail.back());
+    paintPiece(true);
+  }
   m_valid = false;
   TUndoManager::manager()->beginBlock();
   if (m_cellCreated) pushCellsUndo(m_doc, m_layer, m_cellsBefore, "New drawing");
@@ -281,8 +437,10 @@ TRect StrokeSession::end(const TPointD &p, double pressure) {
   TUndoManager::manager()->endBlock();
   m_change.reset();
   m_gen.reset();
-  m_mask = TRasterCM32P();
-  m_base = TRaster32P();
+  m_mask   = TRasterCM32P();
+  m_base   = TRaster32P();
+  m_cov    = TRasterGR8P();
+  m_backup = TRasterP();
   return m_total;
 }
 
@@ -377,6 +535,32 @@ int pickStyleAt(Document *doc, const TPointD &p) {
 }
 
 //=============================================================================
+// Shapes
+
+std::vector<TPointD> shapePoints(ShapeType t, const TPointD &a, const TPointD &b) {
+  std::vector<TPointD> pts;
+  auto seg = [&](TPointD p, TPointD q) {
+    int n = std::max(1, (int)(tdistance(p, q) / 4));
+    for (int i = (pts.empty() ? 0 : 1); i <= n; i++) pts.push_back(p + (q - p) * ((double)i / n));
+  };
+  if (t == ShapeType::Line)
+    seg(a, b);
+  else if (t == ShapeType::Rect) {
+    TPointD c(b.x, a.y), d(a.x, b.y);
+    seg(a, c), seg(c, b), seg(b, d), seg(d, a);
+  } else {
+    TPointD ctr = (a + b) * 0.5;
+    double rx = std::abs(b.x - a.x) * 0.5, ry = std::abs(b.y - a.y) * 0.5;
+    int n = std::max(24, (int)((rx + ry) * 0.6));
+    for (int i = 0; i <= n; i++) {
+      double ang = 2 * M_PI * i / n;
+      pts.push_back(ctr + TPointD(rx * cos(ang), ry * sin(ang)));
+    }
+  }
+  return pts;
+}
+
+//=============================================================================
 // Selection
 
 bool Selection::lift(const TRect &rectIn) {
@@ -405,6 +589,61 @@ bool Selection::lift(const TRect &rectIn) {
   dx = dy = angle = 0;
   scale           = 1;
   m_active        = true;
+  return true;
+}
+
+bool Selection::liftPolygon(const std::vector<TPointD> &poly) {
+  if (poly.size() < 3) return false;
+  // (TRectD::operator+= ignores zero-area rects: compute the bbox directly)
+  double x0 = poly[0].x, y0 = poly[0].y, x1 = x0, y1 = y0;
+  for (auto &p : poly)
+    x0 = std::min(x0, p.x), y0 = std::min(y0, p.y), x1 = std::max(x1, p.x),
+    y1 = std::max(y1, p.y);
+  TRect rect(tfloor(x0), tfloor(y0), tceil(x1), tceil(y1));
+  if (!lift(rect)) return false;
+  // keep in the floating copy only the pixels inside the polygon (pixel
+  // centres, even-odd rule); outside pixels go back to the drawing.
+  TRasterP fl  = rasterOf(m_floating);
+  TRasterP ras = rasterOf(m_img);
+  TRasterCM32P flcm = fl;
+  TRaster32P fl32   = fl;
+  int lifted = 0;
+  for (int y = 0; y < fl->getLy(); y++) {
+    double sy = m_rect.y0 + y + 0.5;
+    std::vector<double> xs;
+    for (size_t i = 0, j = poly.size() - 1; i < poly.size(); j = i++) {
+      const TPointD &a = poly[i], &c = poly[j];
+      if ((a.y > sy) != (c.y > sy))
+        xs.push_back(a.x + (sy - a.y) * (c.x - a.x) / (c.y - a.y));
+    }
+    std::sort(xs.begin(), xs.end());
+    auto inside = [&](double px) {
+      int n = 0;
+      for (double v : xs) if (v < px) n++;
+      return n & 1;
+    };
+    for (int x = 0; x < fl->getLx(); x++) {
+      if (inside(m_rect.x0 + x + 0.5)) {
+        lifted++;
+        continue;
+      }
+      // outside: restore the source pixel and clear it in the floating copy
+      TPoint dp(m_rect.x0 + x, m_rect.y0 + y);
+      if (flcm) {
+        TRasterCM32P rcm = ras;
+        rcm->pixels(dp.y)[dp.x] = flcm->pixels(y)[x];
+        flcm->pixels(y)[x]      = TPixelCM32();
+      } else {
+        TRaster32P r32 = ras;
+        r32->pixels(dp.y)[dp.x] = fl32->pixels(y)[x];
+        fl32->pixels(y)[x]      = TPixel32::Transparent;
+      }
+    }
+  }
+  if (!lifted) {
+    cancel();
+    return false;
+  }
   return true;
 }
 
@@ -460,7 +699,7 @@ TRect Selection::commit() {
 TRect Selection::cancel() {
   if (!m_active) return TRect();
   m_active = false;
-  rasterOf(m_img)->copy(rasterOf(m_floating), m_rect.getP00());
+  TRop::over(rasterOf(m_img), rasterOf(m_floating), m_rect.getP00());
   m_doc->commitDrawing(m_doc->layerByUid(m_layerUid), m_drawing, m_img);
   m_change.reset();
   m_floating = TImageP();

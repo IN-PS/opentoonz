@@ -191,6 +191,14 @@ static void testLayers(Engine &e) {
   stroke(e, line(200, 50, 200, 250));  // red vertical over black
   Img a = render(e, 0);
   const uint8_t *c = a.at(200, 150);
+  if (!(c[0] > 180 && c[1] < 80)) {
+    Layer *L = e.doc()->layer(1);
+    TToonzImageP t = e.doc()->image(L, 0);
+    printf("  DIAG cur=%d cells=%zu cell0=%d pix=(%d,%d,%d) ink=%d tone=%d style3=%d\n",
+           e.doc()->currentLayer, L->cells.size(), L->cell(0), c[0], c[1], c[2],
+           t ? t->getRaster()->pixels(149)[200].getInk() : -1,
+           t ? t->getRaster()->pixels(149)[200].getTone() : -1, e.doc()->currentStyle);
+  }
   CHECK(c[0] > 180 && c[1] < 80);  // red is on top
   e.moveLayer(1, 0);               // red below black
   Img b = render(e, 0);
@@ -531,6 +539,187 @@ static void testWorkerThreadSave(Engine &e) {
   CHECK(ok1 && sameImg(a, render(e, 1)));
 }
 
+
+// ------------------------------------------------------------- v0.2 features
+static int darkCount(const Img &im, int x, int y0, int y1) {
+  int n = 0;
+  for (int y = y0; y <= y1; y++) n += isDark(im.at(x, y)) ? 1 : 0;
+  return n;
+}
+
+static void testProBrush(Engine &e) {
+  section("soft brush (hardness/opacity) + stabilizer");
+  e.newDocument(400, 300, 12);
+  e.tool                 = Tool::Brush;
+  e.settings.brushMax    = 30;
+  e.settings.pressure    = false;
+  e.settings.hardness    = 0;
+  e.doc()->currentStyle  = 1;
+  stroke(e, line(50, 100, 350, 100, 60));
+  Img a = render(e, 0);
+  const uint8_t *c = a.at(200, 100), *edge = a.at(200, 112);
+  printf("  soft brush centre=%d edge=%d\n", c[0], edge[0]);
+  CHECK(c[0] < 40);                       // dense in the middle
+  CHECK(edge[0] > 80 && edge[0] < 245);   // feathered edge
+  // uniform opacity: overlapping stamps must not build up
+  e.settings.hardness = 100;
+  e.settings.opacity  = 50;
+  stroke(e, line(50, 200, 350, 200, 120));
+  Img b = render(e, 0);
+  int v1 = b.at(120, 200)[0], v2 = b.at(250, 200)[0];
+  printf("  50%% opacity stroke = %d / %d\n", v1, v2);
+  CHECK(std::abs(v1 - 128) < 20 && std::abs(v1 - v2) < 6);
+  // the soft stroke is real Toonz Raster ink (style 1), editable by palette
+  TToonzImageP ti = e.doc()->image(e.doc()->layer(0), 0);
+  TPixelCM32 px   = ti->getRaster()->pixels(299 - 200)[200];
+  CHECK(px.getInk() == 1 && px.getTone() > 100 && px.getTone() < 150);
+  e.undo();
+  CHECK(isWhite(render(e, 0).at(200, 200)));
+  // soft eraser
+  e.tool                    = Tool::Eraser;
+  e.settings.eraserSize     = 40;
+  e.settings.eraserHardness = 0;
+  stroke(e, line(200, 60, 200, 140, 20));
+  Img er = render(e, 0);
+  CHECK(isWhite(er.at(200, 100)));
+  int before185 = a.at(185, 100)[0], after185 = er.at(185, 100)[0];
+  printf("  soft eraser at the edge: %d -> %d\n", before185, after185);
+  CHECK(after185 > before185 + 10 && after185 < 250);  // partially erased
+  e.settings = ToolSettings();
+  // stabilizer: a zig-zag input becomes a smoother line
+  e.newDocument(400, 300, 12);
+  e.tool                = Tool::Brush;
+  e.settings.brushMax   = 3;
+  e.settings.pressure   = false;
+  e.settings.stabilizer = 8;
+  std::vector<std::pair<double, double>> zig;
+  for (int i = 0; i <= 80; i++) zig.push_back({40 + i * 4.0, 150 + ((i % 2) ? 12.0 : -12.0)});
+  stroke(e, zig);
+  Img z = render(e, 0);
+  int spread = 0;
+  for (int y = 120; y <= 180; y++) spread += isDark(z.at(200, y)) ? 1 : 0;
+  printf("  stabilizer: dark pixels across the zig-zag at x=200: %d\n", spread);
+  CHECK(spread > 0 && spread < 12);
+  e.settings = ToolSettings();
+}
+
+static void testShapesAndLasso(Engine &e) {
+  section("shape tool (line/rect/ellipse) + lasso selection");
+  e.newDocument(400, 300, 12);
+  e.settings.brushMax = 4;
+  e.settings.pressure = false;
+  e.drawShape((int)ShapeType::Rect, 50, 50, 150, 120);
+  Img r = render(e, 0);
+  CHECK(isDark(r.at(100, 50)) && isDark(r.at(150, 90)) && isDark(r.at(50, 90)));
+  CHECK(isWhite(r.at(100, 85)));
+  e.drawShape((int)ShapeType::Ellipse, 200, 50, 350, 150);
+  Img el = render(e, 0);
+  CHECK(isDark(el.at(275, 50)) && isDark(el.at(350, 100)) && isWhite(el.at(275, 100)));
+  e.drawShape((int)ShapeType::Line, 20, 250, 380, 250);
+  CHECK(isDark(render(e, 0).at(200, 250)));
+  // lasso: a triangle around the rectangle's left half; move it down
+  CHECK(e.selectPolygon({{40, 40}, {110, 40}, {40, 140}}));
+  e.transformSelection(0, 100, 1, 0);
+  e.commitSelection();
+  Img m = render(e, 0);
+  CHECK(isWhite(m.at(60, 50)));    // lifted part of the top edge moved away
+  CHECK(isDark(m.at(130, 50)));    // outside the lasso: untouched
+  CHECK(isDark(m.at(60, 150)));    // moved by +100 y
+  savePng(m, "09_shapes_lasso.png");
+  e.undo();
+  CHECK(isDark(render(e, 0).at(60, 50)));
+}
+
+static void testTiming(Engine &e) {
+  section("timing: reframe on twos/threes, exposure");
+  e.newDocument(200, 100, 12);
+  e.tool = Tool::Brush;
+  for (int f = 0; f < 4; f++) {
+    if (f) e.insertBlankFrame();
+    stroke(e, line(10 + f * 40, 50, 30 + f * 40, 50));
+  }
+  Layer *l = e.doc()->layer(0);
+  std::vector<int> ones = l->cells;
+  e.reframe(2);
+  CHECK(l->cells.size() == 8 && l->cells[0] == l->cells[1] && l->cells[2] == ones[1]);
+  e.reframe(3);
+  CHECK(l->cells.size() == 12 && l->cells[3] == ones[1] && l->cells[5] == ones[1]);
+  e.undo();
+  CHECK(l->cells.size() == 8);
+  e.reframe(1);
+  CHECK(l->cells == ones);
+  e.setCurrentRow(1);
+  e.setExposure(5);
+  CHECK(l->cells.size() == 8 && l->cells[1] == ones[1] && l->cells[5] == ones[1] &&
+        l->cells[6] == ones[2]);
+  e.undo();
+  CHECK(l->cells == ones);
+}
+
+static void testKeyframes(Engine &e) {
+  section("keyframes: layer + camera animation, ease, drawing on moved layer");
+  e.newDocument(400, 300, 12);
+  e.tool                = Tool::Brush;
+  e.settings.brushMax   = 10;
+  e.settings.pressure   = false;
+  stroke(e, line(90, 150, 110, 150));      // a dot-ish dash near x=100
+  for (int f = 1; f < 10; f++) e.holdFrame();
+  CHECK(e.doc()->frameCount() == 10);
+  Xform a, b;
+  b.x = 200;                               // move right by 200 px
+  e.setKey(0, 0, a, Ease::Linear);
+  e.setKey(0, 8, b, Ease::Linear);
+  CHECK(std::abs(e.xformAt(0, 4).x - 100) < 1e-6);
+  CHECK(isDark(render(e, 0).at(100, 150)));
+  CHECK(isDark(render(e, 4).at(200, 150)) && isWhite(render(e, 4).at(100, 150)));
+  CHECK(isDark(render(e, 9).at(300, 150)));  // after the last key: holds
+  e.setKey(0, 0, a, Ease::EaseInOut);
+  double eased = e.xformAt(0, 2).x;        // smoothstep(0.25) = 0.15625
+  printf("  ease-in-out at 1/4: x=%.2f (linear would be 50)\n", eased);
+  CHECK(std::abs(eased - 31.25) < 1e-6);
+  // rotation + scale + opacity
+  // rotation 90 deg clockwise around the canvas centre (200,150) + 50%
+  // opacity: the horizontal dash at x=90..110 becomes vertical at x=200,
+  // y=40..60
+  Xform c;
+  c.rot = 90, c.opacity = 0.5;
+  e.setKey(0, 8, c, Ease::Linear);
+  Img rot = render(e, 8);
+  const uint8_t *g = rot.at(200, 50);
+  printf("  rotated+50%% pixel = (%d,%d,%d)\n", g[0], g[1], g[2]);
+  CHECK(g[0] > 90 && g[0] < 170);          // 50% grey
+  CHECK(isWhite(rot.at(100, 150)));        // no longer at its original place
+  CHECK(isWhite(rot.at(215, 50)));         // vertical: narrow along x
+  // drawing on a moved layer lands under the finger
+  e.setCurrentRow(4);
+  stroke(e, line(250, 60, 270, 60));
+  // row 4 is half-way: rotation 45 deg, opacity 75% -> black ink shows as 64
+  int v260 = render(e, 4).at(260, 60)[0];
+  printf("  stroke drawn on the moved layer, under the finger: value %d\n", v260);
+  CHECK(v260 < 90);
+  // camera: pan right 50 -> everything appears 50 px to the left
+  Xform cam;
+  cam.x = 50;
+  e.setKey(-1, 0, cam, Ease::Linear);
+  CHECK(isDark(render(e, 0).at(50, 150)) && isWhite(render(e, 0).at(100, 150)));
+  // camera zoom 2 around the centre
+  cam.x = 0, cam.scale = 2;
+  e.setKey(-1, 0, cam, Ease::Linear);
+  CHECK(isDark(render(e, 0).at(0, 150)) || isDark(render(e, 0).at(1, 150)));
+  savePng(render(e, 4), "10_keyframes.png");
+  // undo / save / load keep the animation
+  e.undo();
+  CHECK(e.xformAt(-1, 0).scale == 1 && e.xformAt(-1, 0).x == 50);
+  std::string err, dir = g_out + "/keysproj";
+  CHECK(e.save(dir, &err));
+  Img before = render(e, 4);
+  e.newDocument(10, 10, 12);
+  CHECK(e.load(dir, &err));
+  CHECK(e.keyRows(0).size() == 2 && e.keyRows(-1).size() == 1);
+  CHECK(sameImg(before, render(e, 4)));
+  e.settings = ToolSettings();
+}
+
 static void testExport(Engine &e) {
   section("export GIF + PNG sequence");
   e.newDocument(320, 180, 10);
@@ -652,6 +841,10 @@ int main(int argc, char **argv) {
   testImport(e);
   testSaveLoad(e);
   testWorkerThreadSave(e);
+  testProBrush(e);
+  testShapesAndLasso(e);
+  testTiming(e);
+  testKeyframes(e);
   testExport(e);
   testGifQuantizer();
   testMemoryAndPerf(e);

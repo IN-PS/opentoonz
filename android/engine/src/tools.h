@@ -23,7 +23,11 @@ class TTileSaverFullColor;
 
 namespace otm {
 
-enum class Tool { Brush = 0, Eraser = 1, Fill = 2, Select = 3, Picker = 4 };
+enum class Tool {
+  Brush = 0, Eraser = 1, Fill = 2, Select = 3, Picker = 4, Shape = 5,
+  Transform = 6
+};
+enum class ShapeType { Line = 0, Rect = 1, Ellipse = 2 };
 enum class FillMode { Areas = 0, Lines = 1, LinesAndAreas = 2 };
 enum class EraseMode { LinesAndAreas = 0, Lines = 1, Areas = 2 };
 
@@ -37,6 +41,11 @@ struct ToolSettings {
   FillMode fillMode  = FillMode::Areas;
   int fillDepth      = 10;    // 0..15 "Maximum Gap" like desktop fill depth
   bool fillEmptyOnly = false;
+  // professional brush options
+  int hardness       = 100;   // 0..100; 100 = OpenToonz hard brush engine
+  int opacity        = 100;   // 0..100 (per stroke, no build-up)
+  int stabilizer     = 0;     // 0..10 smoothing of the input
+  int eraserHardness = 100;
 };
 
 //! Records the pixels of one drawing that a tool is about to change, and
@@ -71,6 +80,17 @@ public:
 private:
   TRect paintPiece(bool last);
   double thickness(double pressure) const;
+  TThickPoint smooth(const TPointD &p, double pressure);
+  // soft (hardness/opacity) engine
+  bool soft() const;
+  TRect stampSegment(const TThickPoint &a, const TThickPoint &b, bool first);
+  void applySoft(const TRect &r);
+  TRasterGR8P m_cov;     // per-stroke coverage (max of the stamps)
+  TRasterP m_backup;     // drawing before the stroke
+  TThickPoint m_lastSoft;
+  bool m_softMode = false;
+  TPointD m_sp;          // stabilizer state
+  double m_spPressure = 1;
 
   Document *m_doc;
   ToolSettings m_s;
@@ -101,6 +121,8 @@ public:
   explicit Selection(Document *doc) : m_doc(doc) {}
   //! Lifts the pixels in rect (raster coords) of the current drawing.
   bool lift(const TRect &rect);
+  //! Lasso: lifts the pixels inside a polygon (raster coords).
+  bool liftPolygon(const std::vector<TPointD> &poly);
   bool active() const { return m_active; }
   //! Transform relative to the original selection centre.
   void setTransform(double dx, double dy, double scale, double angleDeg);
@@ -122,6 +144,9 @@ private:
   TImageP m_img, m_floating;
   std::unique_ptr<RasterChange> m_change;
 };
+
+//! Points of a shape outline (raster coords) for the Shape tool.
+std::vector<TPointD> shapePoints(ShapeType t, const TPointD &a, const TPointD &b);
 
 //! Undo of cell / drawing-structure edits of one layer.
 void pushCellsUndo(Document *doc, Layer *layer,

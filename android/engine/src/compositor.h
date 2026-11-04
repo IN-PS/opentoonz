@@ -29,7 +29,8 @@ public:
   //! \b outClip is \b out restricted to \b clip.
   void drawImage(const Document &doc, const TImageP &img,
                  const TRaster32P &outClip, const TRect &clip, int opacity,
-                 const TPixel32 *colorScale = nullptr);
+                 const TPixel32 *colorScale = nullptr,
+                 const TAffine &aff = TAffine());
 
   //! Rows of the drawings used as onion skin around \b row for \b layer:
   //! negative distance = back, positive = forward.
@@ -39,7 +40,9 @@ public:
 
 private:
   void drawFloating(const Document &doc, const Selection &sel,
-                    const TRaster32P &outClip, const TRect &clip);
+                    const TRaster32P &outClip, const TRect &clip,
+                    const TAffine &layerAff);
+  TRaster32P m_full;  // full-size buffer for transformed layers
   TRaster32P tempFor(const TDimension &d);
   TRaster32P m_tmp;
 };

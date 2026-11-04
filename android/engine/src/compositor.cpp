@@ -6,6 +6,7 @@
 #include "trasterimage.h"
 #include "ttoonzimage.h"
 
+#include <cmath>
 #include <set>
 
 namespace otm {
@@ -40,8 +41,28 @@ static void scaleOpacity(const TRaster32P &ras, int opacity) {
 
 void Compositor::drawImage(const Document &doc, const TImageP &img,
                            const TRaster32P &outClip, const TRect &clip,
-                           int opacity, const TPixel32 *colorScale) {
+                           int opacity, const TPixel32 *colorScale,
+                           const TAffine &aff) {
   if (!img || opacity <= 0) return;
+  if (!aff.isIdentity()) {
+    // animated layer / camera: whole drawing to RGBM, then resampled
+    TRasterP src;
+    if (TToonzImageP ti = img) src = ti->getRaster();
+    else if (TRasterImageP ri = img) src = ri->getRaster();
+    if (!src) return;
+    if (!m_full || m_full->getSize() != src->getSize())
+      m_full = TRaster32P(src->getSize());
+    m_full->clear();
+    if (TRasterCM32P cm = src)
+      TRop::convert(m_full, cm, TPaletteP(doc.palette()), false);
+    else
+      m_full->copy(src);
+    if (colorScale) TRop::applyColorScale(m_full, *colorScale);
+    scaleOpacity(m_full, opacity);
+    TRop::over(outClip, m_full, TTranslation(-clip.x0, -clip.y0) * aff,
+               TRop::Triangle);
+    return;
+  }
   TRaster32P tmp = tempFor(clip.getSize());
   if (TToonzImageP ti = img) {
     TRasterCM32P cm = ti->getRaster();
@@ -67,9 +88,10 @@ void Compositor::drawImage(const Document &doc, const TImageP &img,
 }
 
 void Compositor::drawFloating(const Document &doc, const Selection &sel,
-                              const TRaster32P &outClip, const TRect &clip) {
+                              const TRaster32P &outClip, const TRect &clip,
+                              const TAffine &layerAff) {
   TImageP img = sel.floating();
-  TAffine aff = TTranslation(-clip.x0, -clip.y0) * sel.affine();
+  TAffine aff = TTranslation(-clip.x0, -clip.y0) * layerAff * sel.affine();
   TRaster32P tmp = tempFor(clip.getSize());
   tmp->clear();
   if (TToonzImageP ti = img)
@@ -137,13 +159,16 @@ void Compositor::render(const Document &doc, int row, const TRaster32P &out,
         TPixel32 cs  = o.first < 0 ? opt.backOnion : opt.frontOnion;
         cs.m         = 255;
         drawImage(doc, doc.image(layer, o.second), outClip, clip, opacity,
-                  doc.onion.tint ? &cs : nullptr);
+                  doc.onion.tint ? &cs : nullptr,
+                  doc.layerAffine(layer, o.second));
       }
     }
-    drawImage(doc, doc.image(layer, row), outClip, clip, layer->opacity);
+    TAffine aff = doc.layerAffine(layer, row);
+    int op      = (int)std::lround(doc.layerOpacity(layer, row) * 255);
+    drawImage(doc, doc.image(layer, row), outClip, clip, op, nullptr, aff);
     if (opt.selection && opt.selection->active() &&
         opt.selection->layerUid() == layer->uid)
-      drawFloating(doc, *opt.selection, outClip, clip);
+      drawFloating(doc, *opt.selection, outClip, clip, aff);
   }
 }
 
