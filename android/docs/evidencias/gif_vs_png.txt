@@ -1,0 +1,10 @@
+GIF: 320x180, 8 frames, 100 ms/frame, loop=0 (decoded with Pillow)
+PNG sequence: 8 files
+frame 1: max channel diff GIF vs PNG = 0
+frame 2: max channel diff GIF vs PNG = 7
+frame 3: max channel diff GIF vs PNG = 7
+frame 4: max channel diff GIF vs PNG = 7
+frame 5: max channel diff GIF vs PNG = 7
+frame 6: max channel diff GIF vs PNG = 7
+frame 7: max channel diff GIF vs PNG = 0
+frame 8: max channel diff GIF vs PNG = 7

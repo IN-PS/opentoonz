@@ -1,0 +1,28 @@
+[brush stroke on Toonz Raster (RasterStrokeGenerator)]
+[multi-frame animation + onion skin]
+  onion prev=(255,175,175) next=(170,226,179)
+[layers: order, visibility, opacity, lock]
+  50% red over white = (242,147,147)
+[fill (toonzlib fill.cpp) + eraser + palette recolour]
+[selection + transform (TRop::resample / TRop::over on CM32)]
+[undo / redo (TUndoManager)]
+[import PNG + image sequence (raster layers)]
+  imported centre = (127,125,128)
+[save / load project (TLV + TPL + PNG + project.otm)]
+  levels: in_small_2.0001.png, Ink___Paint_1.tlv, Ink___Paint_1.tpl
+  bad project -> "not an OpenToonz Mobile project"
+[save/load from a worker thread (Android autosave path)]
+[export GIF + PNG sequence]
+  gif export: 11.0 ms for 8 frames
+[GIF quantizer]
+[memory (TImageCache compression) + performance, 1280x720 x 120 frames]
+  stroke segment avg: 0.045 ms
+  process RSS: 25448 KB -> 56820 KB (+31372 KB) for 120 CM32 frames; uncompressed drawings alone would be 432000 KB
+  full-frame render (onion on): 4.56 ms
+  64x64 dirty-rect render: 0.019 ms
+  save 120 frames (full): 3235 ms
+  save after editing 1 frame of a new layer (incremental): 35 ms
+  save with no level changes: 1 ms
+  load 120 frames: 3725 ms
+
+126 checks passed, 0 failed
