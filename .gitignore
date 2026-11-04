@@ -45,3 +45,5 @@ ipch/
 android/out/
 !android/build-apk.sh
 !android/tools/build-qt5-android.sh
+android/hosttest/build/
+android/hosttest/.gradle/

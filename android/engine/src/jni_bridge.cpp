@@ -89,8 +89,14 @@ JF(void, init)(JNIEnv *env, jclass, jstring cacheDir, jstring nativeLibDir) {
   // installed with the native libraries (lib<name>.so naming).
   std::string comp   = libDir + "/liblzocompress.so";
   std::string decomp = libDir + "/liblzodecompress.so";
+#ifdef __ANDROID__
   setenv("OTM_LZOCOMPRESS", comp.c_str(), 1);
   setenv("OTM_LZODECOMPRESS", decomp.c_str(), 1);
+#else
+  // host (JVM tests): keep helper paths given by the test runner
+  setenv("OTM_LZOCOMPRESS", comp.c_str(), 0);
+  setenv("OTM_LZODECOMPRESS", decomp.c_str(), 0);
+#endif
   if (!QCoreApplication::instance()) {
     static int argc    = 1;
     static char arg0[] = "opentoonz-mobile";
@@ -184,6 +190,76 @@ JF(jboolean, importBitmap)(JNIEnv *env, jclass, jobject bitmap,
   AndroidBitmap_unlockPixels(env, bitmap);
   return E().importRGBA(rgba.data(), info.width, info.height, newLayer, true,
                         rowOffset, str(env, name));
+}
+#else  // ---------------------------------------------------------- host JVM
+// Host versions (Robolectric tests on the JVM): pixels go through the
+// android.graphics.Bitmap Java API instead of <android/bitmap.h>.
+namespace {
+struct BmpApi {
+  jmethodID w, h, set, get;
+  explicit BmpApi(JNIEnv *env) {
+    jclass c = env->FindClass("android/graphics/Bitmap");
+    w   = env->GetMethodID(c, "getWidth", "()I");
+    h   = env->GetMethodID(c, "getHeight", "()I");
+    set = env->GetMethodID(c, "setPixels", "([IIIIIII)V");
+    get = env->GetMethodID(c, "getPixels", "([IIIIIII)V");
+  }
+};
+void putRgba(JNIEnv *env, jobject bmp, const uint8_t *rgba, int x0, int y0,
+             int w, int h, int stride) {
+  BmpApi api(env);
+  std::vector<jint> px((size_t)w * h);
+  for (int y = 0; y < h; y++)
+    for (int x = 0; x < w; x++) {
+      const uint8_t *p = rgba + (size_t)(y + y0) * stride + (size_t)(x + x0) * 4;
+      int a = p[3], r = p[0], g = p[1], b = p[2];
+      if (a > 0 && a < 255) r = r * 255 / a, g = g * 255 / a, b = b * 255 / a;
+      px[(size_t)y * w + x] = (jint)(((uint32_t)a << 24) | (r << 16) | (g << 8) | b);
+    }
+  jintArray arr = env->NewIntArray(w * h);
+  env->SetIntArrayRegion(arr, 0, w * h, px.data());
+  env->CallVoidMethod(bmp, api.set, arr, 0, w, x0, y0, w, h);
+  env->DeleteLocalRef(arr);
+}
+}  // namespace
+
+JF(void, render)(JNIEnv *env, jclass, jobject bitmap, jint row, jint x0,
+                 jint y0, jint x1, jint y1, jboolean onion) {
+  int w = E().doc()->width(), h = E().doc()->height();
+  x0 = std::max(0, (int)x0), y0 = std::max(0, (int)y0);
+  x1 = std::min(w - 1, (int)x1), y1 = std::min(h - 1, (int)y1);
+  if (x1 < x0 || y1 < y0) return;
+  std::vector<uint8_t> buf((size_t)w * h * 4);
+  E().renderRGBA(row, buf.data(), w * 4, x0, y0, x1, y1, onion);
+  putRgba(env, bitmap, buf.data(), x0, y0, x1 - x0 + 1, y1 - y0 + 1, w * 4);
+}
+
+JF(void, renderThumb)(JNIEnv *env, jclass, jobject bitmap, jint row) {
+  BmpApi api(env);
+  int w = env->CallIntMethod(bitmap, api.w), h = env->CallIntMethod(bitmap, api.h);
+  std::vector<uint8_t> buf((size_t)w * h * 4);
+  E().renderScaledRGBA(row, buf.data(), w, h, w * 4, false);
+  putRgba(env, bitmap, buf.data(), 0, 0, w, h, w * 4);
+}
+
+JF(jboolean, importBitmap)(JNIEnv *env, jclass, jobject bitmap,
+                           jboolean newLayer, jint rowOffset, jstring name) {
+  BmpApi api(env);
+  int w = env->CallIntMethod(bitmap, api.w), h = env->CallIntMethod(bitmap, api.h);
+  if (w <= 0 || h <= 0) return false;
+  jintArray arr = env->NewIntArray(w * h);
+  env->CallVoidMethod(bitmap, api.get, arr, 0, w, 0, 0, w, h);
+  std::vector<jint> px((size_t)w * h);
+  env->GetIntArrayRegion(arr, 0, w * h, px.data());
+  env->DeleteLocalRef(arr);
+  std::vector<uint8_t> rgba((size_t)w * h * 4);
+  for (size_t i = 0; i < px.size(); i++) {
+    uint32_t c = (uint32_t)px[i];
+    rgba[i * 4 + 0] = (c >> 16) & 255, rgba[i * 4 + 1] = (c >> 8) & 255;
+    rgba[i * 4 + 2] = c & 255, rgba[i * 4 + 3] = c >> 24;
+  }
+  return E().importRGBA(rgba.data(), w, h, newLayer, true, rowOffset,
+                        str(env, name));
 }
 #endif
 

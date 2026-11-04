@@ -1,0 +1,37 @@
+name: OpenToonz Mobile Release
+
+# Publishes the APKs committed under android/releases/<version>/ as a GitHub
+# Release (pre-release: not yet validated on a physical device).
+on:
+  push:
+    paths:
+      - 'android/releases/**'
+      - '.github/workflows/android_release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify checksums
+        run: |
+          for d in android/releases/v*/; do (cd "$d" && sha256sum -c SHA256SUMS); done
+      - name: Create or update releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for d in android/releases/v*/; do
+            v=$(basename "$d")
+            files=$(ls "$d"*.apk "$d"SHA256SUMS)
+            if gh release view "$v" >/dev/null 2>&1; then
+              gh release upload "$v" $files --clobber
+              gh release edit "$v" --notes-file "${d}NOTAS.md"
+            else
+              gh release create "$v" $files --target "$GITHUB_SHA" \
+                --title "OpenToonz Mobile $v" --notes-file "${d}NOTAS.md" --prerelease
+            fi
+          done
