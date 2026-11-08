@@ -36,7 +36,7 @@ make -j"$(nproc)" -C src sub-corelib
 make -C src/corelib install
 # host tools (moc) are built for the build machine; install them too
 mkdir -p "$PREFIX/bin"
-cp bin/moc "$PREFIX/bin/" 2>/dev/null || true
+cp bin/moc bin/qmake "$PREFIX/bin/" 2>/dev/null || true
 command -v rcc >/dev/null && cp "$(command -v rcc)" "$PREFIX/bin/" || true
 make install_mkspecs
 ls "$PREFIX/lib" | grep -i qt5core

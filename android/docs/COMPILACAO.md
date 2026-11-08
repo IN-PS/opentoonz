@@ -95,7 +95,18 @@ Se o NDK precisar vir de um espelho não oficial, use apenas o *sysroot* dele
 e os compiladores LLVM 18 da distribuição:
 `android/tools/make-hybrid-ndk.sh <ndk>` troca os executáveis do NDK por
 wrappers do `clang-18`/`lld` do sistema. **Para distribuir o APK, prefira o
-NDK oficial do Google** (o `libc++_shared.so` vai dentro do APK).
+NDK oficial do Google** (o `libc++_shared.so` vai dentro do APK). A partir
+da v0.3.0 os APKs publicados usam o NDK oficial r27c (27.2.12479018) para o
+Qt5Core e para o motor.
+
+## 6b. Teste de compatibilidade com cenas do desktop
+
+`android/tools/tnzcompat/build.sh <build-desktop> <fonte> <saida>` compila o
+`mkscene` contra um build desktop do OpenToonz (deste repositório; requer
+`-DNDEBUG`, igual às bibliotecas, porque muda o layout de `TSmartObject`).
+`TOONZROOT=<stuff> xvfb-run -a mkscene <stuff>/sandbox/scenes/x.tnz` grava
+uma cena real (TLV, PLI, PNG). A cena usada nos testes está em
+`engine/tests/data/desktop_scene`.
 
 ## 7. Estrutura
 
@@ -106,7 +117,9 @@ android/
     src/                    document, compositor, tools, projectio, gifencoder, engine, jni_bridge
     compat/                 stubs de GL (gerados) e TOfflineGL nulo, compat do LZO
     tests/otm_tests.cpp     testes do motor
+    tests/data/             cena .tnz gravada pelo OpenToonz desktop
   app/src/main/             AndroidManifest, Java (UI touch), recursos
-  tools/                    make-hybrid-ndk.sh, build-qt5-android.sh, gen_glstub.py
+  tools/                    make-hybrid-ndk.sh, build-qt5-android.sh, gen_glstub.py,
+                            tnzcompat/ (gera cena .tnz com o OpenToonz desktop)
   docs/                     esta documentação
 ```

@@ -1,7 +1,7 @@
 # OpenToonz Mobile — Relatório de funcionalidades, testes e pendências
 
-**Estado (honesto):** APKs debug e release **gerados** (v0.1.1, testes do app na JVM 6/6; v0.1.0 substituída, arm64-v8a,
-`android/releases/v0.1.1/`, publicados em GitHub Releases), assinados e verificados (apksigner v2/v3), com
+**Estado (honesto):** APKs debug e release **gerados** (v0.3.0, motor 220/220, app na JVM 13/13, arm64-v8a,
+`android/releases/v0.3.0/`, publicados em GitHub Releases), assinados e verificados (apksigner v2/v3), com
 todas as dependências nativas resolvidas. **Ainda não foram instalados nem
 executados num aparelho ARM64** — o port só pode ser considerado concluído
 após esse teste. Ver §4.
@@ -50,7 +50,33 @@ físico, exportação de sequência PNG, interface em português e inglês.
 | Caneta digital | pressão (`getPressure`), `TOOL_TYPE_STYLUS/ERASER`, cursor em *hover*, rejeição de palma (após detectar caneta, dedos só navegam) |
 | Horizontal e vertical | `configChanges` tratados; layout em blocos que se adapta às duas orientações |
 
-## 0. Versão 0.2.0 — recursos para animação profissional
+## 0. Versão 0.3.0 — vetores, rig, efeitos, .tnz do desktop
+
+* **Camadas vetoriais** (`TVectorImage`/`TStroke` do tnzcore, salvas em
+  `.pli`): pincel, formas, preenchimento de regiões, seleção/transformação,
+  rasterização em CPU com antisserrilhado (independente de resolução).
+* **Hierarquia de pegs** (pai/filho entre camadas) e **pivô** por camada:
+  rig de recorte com cinemática direta (FK). **Não há IK** (cinemática
+  inversa) nem deformação *plastic*.
+* **Efeitos por camada**: desfoque, brilho (*glow*), sombra projetada,
+  brilho/contraste/saturação/matiz, com cache.
+* **Pincel texturizado** (grão de papel + dispersão) — alternativa ao MyPaint,
+  que não foi compilado (ver §5).
+* **Várias trilhas de áudio**, mixadas em 44,1 kHz estéreo no MP4.
+* **Abrir cena `.tnz` do desktop**: câmera, fps, colunas (TLV, PLI, PNG e
+  sequências), exposição/holds, visibilidade, bloqueio, opacidade; paletas
+  mescladas. Verificado com uma cena **gravada pelas bibliotecas do OpenToonz
+  desktop** compiladas deste repositório (`android/tools/tnzcompat/mkscene`,
+  arquivo em `engine/tests/data/desktop_scene`): teste do motor
+  `testTnzImport` e teste do app `t13`. Esse teste achou e corrigiu um bug
+  (PNG RGBA de 8 bits não era importado). Não importados: FX do schematic,
+  pegs/keyframes do desktop, níveis de sub-xsheet, som, outros formatos.
+* APKs compilados com o **NDK oficial r27c** (Qt5Core recompilado com ele).
+
+Testes: motor **220/220**, app na JVM **13/13**. **Ainda sem teste em
+aparelho ARM64.** Detalhes em `releases/v0.3.0/NOTAS.md`.
+
+## 0b. Versão 0.2.0 — recursos para animação profissional
 
 Pincel com dureza/opacidade, borracha macia, estabilizador, formas (linha,
 retângulo, elipse), seleção laço, keyframes de camada e câmera com ease,
@@ -134,18 +160,19 @@ oficial (`android/docs/COMPILACAO.md`).
 
 ## 5. Recursos do OpenToonz ainda incompatíveis / não portados
 
-* Cena `.tnz` completa e projetos do desktop (o app grava `.tlv`/`.tpl`/`.png`
-  compatíveis, mas não a cena; abrir `.tnz` do desktop não é suportado).
-* Níveis e ferramentas **vetoriais** (`.pli`, Geometric tool, *tape*, *inbetween*
-  vetorial) — o código de vetor do tnzcore está compilado, falta a
-  rasterização em CPU (no desktop é OpenGL).
-* Pincel MyPaint / pincel "blurred" (hardness < 100) e pincéis personalizados.
-* Sistema de FX (`tnzbase`, `stdfx`, `colorfx`), schematic, render farm.
-* Pegs com hierarquia, curvas de função e expressões do `TStageObject`
-  (a v0.2.0 tem keyframes de camada/câmera próprios, sem hierarquia),
-  esqueleto/IK, deformação *plastic* (`tnzext`, SuperLU/BLAS).
-* Múltiplas colunas de som e lip-sync automático (a v0.2.0 tem uma trilha
-  de áudio com forma de onda e scrub), stop motion, cleanup/scanner.
+* Cena `.tnz`: importação parcial (ver §0); FX do schematic, pegs e curvas
+  do desktop, sub-xsheets e colunas de som não são importados; o app não
+  grava `.tnz` (grava `.tlv`/`.tpl`/`.pli`/`.png` compatíveis).
+* Ferramentas vetoriais avançadas (Geometric com todos os modos, *tape*,
+  *inbetween* vetorial, *control point editor*).
+* Pincel **MyPaint** (libmypaint + json-c não foram compilados neste
+  ambiente; o pincel texturizado próprio cobre parte do uso) e pincéis
+  personalizados.
+* Sistema de FX completo (`tnzbase`, `stdfx`, `colorfx`), schematic, render
+  farm — a v0.3.0 tem um conjunto próprio de efeitos por camada.
+* Curvas de função e expressões do `TStageObject`; **esqueleto com IK** e
+  deformação *plastic* (`tnzext`, SuperLU/BLAS) — há hierarquia + pivô (FK).
+* Lip-sync automático, stop motion, cleanup/scanner.
 * Outros formatos: TIFF, PSD, TGA, BMP, SVG, WebM/AVI/APNG (ffmpeg).
 * Régua, grade/guia de câmera.
 * Interface Qt do desktop (`toonz`, `toonzqt`) — substituída pela UI móvel.
