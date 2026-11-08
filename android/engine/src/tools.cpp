@@ -303,7 +303,25 @@ TRect StrokeSession::move(const TPointD &p, double pressure) {
 
 bool StrokeSession::soft() const {
   if (m_tool == Tool::Eraser) return m_s.eraserHardness < 100;
-  return m_s.hardness < 100 || m_s.opacity < 100;
+  return m_s.hardness < 100 || m_s.opacity < 100 || m_s.grain > 0 || m_s.scatter > 0;
+}
+
+// Paper grain: smooth value noise on a fixed canvas-space grid (2 octaves).
+static inline double hash01(int x, int y) {
+  unsigned h = (unsigned)x * 374761393u + (unsigned)y * 668265263u;
+  h          = (h ^ (h >> 13)) * 1274126177u;
+  return ((h ^ (h >> 16)) & 0xFFFF) / 65535.0;
+}
+static double valueNoise(double x, double y) {
+  int ix = (int)std::floor(x), iy = (int)std::floor(y);
+  double fx = x - ix, fy = y - iy;
+  fx = fx * fx * (3 - 2 * fx), fy = fy * fy * (3 - 2 * fy);
+  double a = hash01(ix, iy), b = hash01(ix + 1, iy), c = hash01(ix, iy + 1),
+         d = hash01(ix + 1, iy + 1);
+  return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+}
+static double paperGrain(int px, int py) {
+  return 0.65 * valueNoise(px / 2.3, py / 2.3) + 0.35 * valueNoise(px / 0.9, py / 0.9);
 }
 
 static inline double softFalloff(double d, double r, double hard) {
@@ -331,6 +349,14 @@ TRect StrokeSession::stampSegment(const TThickPoint &a, const TThickPoint &b,
     double t = (double)i / n;
     double x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t;
     double r = std::max(0.5, (a.thick + (b.thick - a.thick) * t) * 0.5);
+    if (!eraser && m_s.scatter > 0) {  // spray-like dab jitter
+      auto rnd = [this]() {
+        m_rng = m_rng * 1664525u + 1013904223u;
+        return ((m_rng >> 8) & 0xFFFF) / 65535.0 - 0.5;
+      };
+      double k = r * 2.0 * m_s.scatter / 100.0;
+      x += rnd() * k, y += rnd() * k;
+    }
     TRect sr(tfloor(x - r - 1), tfloor(y - r - 1), tceil(x + r + 1),
              tceil(y + r + 1));
     sr = sr * bounds;
@@ -339,7 +365,10 @@ TRect StrokeSession::stampSegment(const TThickPoint &a, const TThickPoint &b,
       TPixelGR8 *c = m_cov->pixels(py) + sr.x0;
       for (int px = sr.x0; px <= sr.x1; px++, c++) {
         double d = std::hypot(px + 0.5 - x, py + 0.5 - y);
-        int v    = (int)(opac * softFalloff(d, r, hard) * 255 + 0.5);
+        double f = softFalloff(d, r, hard);
+        if (!eraser && m_s.grain > 0)
+          f *= std::max(0.0, 1.0 - m_s.grain / 100.0 * 1.6 * paperGrain(px, py));
+        int v    = (int)(opac * f * 255 + 0.5);
         if (v > c->value) c->value = v;
       }
     }

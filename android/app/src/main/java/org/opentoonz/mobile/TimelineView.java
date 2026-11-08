@@ -36,8 +36,8 @@ public class TimelineView extends View {
     private int mRows, mCurRow, mCurLayer;
     private boolean[][] mKeys = new boolean[0][0];
     private boolean[] mCamKeys = new boolean[0];
-    private float[] mAudioPeaks;            // per frame 0..1, null = no audio
-    private int mAudioOffset;
+    private java.util.List<float[]> mAudioPeaks = new java.util.ArrayList<>();  // per track
+    private java.util.List<Integer> mAudioOffsets = new java.util.ArrayList<>();
     // cell drag
     private int mDragLayer = -1, mDragFrom = -1, mDragTo = -1;
     private final android.graphics.Path mDiamond = new android.graphics.Path();
@@ -89,13 +89,21 @@ public class TimelineView extends View {
 
     /** Audio waveform (one peak per frame, 0..1) shown in an extra row. */
     public void setAudio(float[] peaks, int offsetFrames) {
+        java.util.List<float[]> p = new java.util.ArrayList<>();
+        java.util.List<Integer> o = new java.util.ArrayList<>();
+        if (peaks != null) { p.add(peaks); o.add(offsetFrames); }
+        setAudioTracks(p, o);
+    }
+
+    /** One waveform row per sound track. */
+    public void setAudioTracks(java.util.List<float[]> peaks, java.util.List<Integer> offsets) {
         mAudioPeaks = peaks;
-        mAudioOffset = offsetFrames;
+        mAudioOffsets = offsets;
         requestLayout();
         invalidate();
     }
 
-    private int extraRows() { return mAudioPeaks != null ? 1 : 0; }
+    private int extraRows() { return mAudioPeaks.size(); }
 
     private int layerAt(float y) {
         if (y <= mHeaderH) return -1;
@@ -298,23 +306,25 @@ public class TimelineView extends View {
             c.restore();
             c.drawLine(0, y + mCellH, w, y + mCellH, mLine);
         }
-        if (mAudioPeaks != null) {
-            float y = mHeaderH + mNames.length * mCellH - mScrollY;
+        for (int t = 0; t < mAudioPeaks.size(); t++) {
+            float[] peaks = mAudioPeaks.get(t);
+            int offset = mAudioOffsets.get(t);
+            float y = mHeaderH + (mNames.length + t) * mCellH - mScrollY;
             c.save();
             c.clipRect(0, mHeaderH, w, h);
             mFill.setColor(0xFF232733);
             c.drawRect(0, y, w, y + mCellH, mFill);
             mText.setTextAlign(Paint.Align.LEFT);
             mText.setColor(0xFF9AD0FF);
-            c.drawText("\u266A Audio", Ui.dp(getContext(), 6), y + mCellH * 0.65f, mText);
+            c.drawText("\u266A Audio " + (t + 1), Ui.dp(getContext(), 6), y + mCellH * 0.65f, mText);
             c.clipRect(mNameW, mHeaderH, w, h);
-            mFill.setColor(0xFF6EC6FF);
+            mFill.setColor(t % 2 == 0 ? 0xFF6EC6FF : 0xFFB39DFF);
             float mid = y + mCellH / 2f, amp = mCellH * 0.42f;
             for (int col = firstCol; col <= lastCol; col++) {
-                int i = col - mAudioOffset;
-                if (i < 0 || i >= mAudioPeaks.length) continue;
+                int i = col - offset;
+                if (i < 0 || i >= peaks.length) continue;
                 float x = mNameW + col * mCellW - mScrollX;
-                float a = Math.max(1, mAudioPeaks[i] * amp);
+                float a = Math.max(1, peaks[i] * amp);
                 c.drawRect(x + 3, mid - a, x + mCellW - 3, mid + a, mFill);
             }
             c.restore();

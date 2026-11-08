@@ -46,6 +46,8 @@ struct ToolSettings {
   int opacity        = 100;   // 0..100 (per stroke, no build-up)
   int stabilizer     = 0;     // 0..10 smoothing of the input
   int eraserHardness = 100;
+  int grain          = 0;     // 0..100 paper texture (pencil / chalk look)
+  int scatter        = 0;     // 0..100 random dab offset (spray / textured)
 };
 
 //! Records the pixels of one drawing that a tool is about to change, and
@@ -89,6 +91,7 @@ private:
   TRasterP m_backup;     // drawing before the stroke
   TThickPoint m_lastSoft;
   bool m_softMode = false;
+  unsigned m_rng = 12345;  // deterministic scatter per stroke
   TPointD m_sp;          // stabilizer state
   double m_spPressure = 1;
 

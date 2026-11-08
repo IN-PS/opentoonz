@@ -604,6 +604,29 @@ static void testProBrush(Engine &e) {
   e.settings = ToolSettings();
 }
 
+static void testTexture(Engine &e) {
+  section("textured brush: paper grain + scatter");
+  e.newDocument(400, 200, 12);
+  e.tool = Tool::Brush;
+  e.settings = ToolSettings();
+  e.settings.brushMax = 24, e.settings.pressure = false, e.settings.grain = 90;
+  stroke(e, line(30, 100, 370, 100, 60));
+  Img g = render(e, 0);
+  int mn = 255, mx = 0;
+  for (int x = 60; x < 340; x += 2) mn = std::min<int>(mn, g.at(x, 100)[0]), mx = std::max<int>(mx, g.at(x, 100)[0]);
+  printf("  grain 90: values along the stroke %d..%d\n", mn, mx);
+  CHECK(mx - mn > 60);
+  e.newDocument(400, 200, 12);
+  e.settings.grain = 0, e.settings.scatter = 100, e.settings.hardness = 40;
+  stroke(e, line(30, 100, 370, 100, 60));
+  Img s = render(e, 0);
+  int outside = 0;
+  for (int x = 40; x < 360; x++) outside += !isWhite(s.at(x, 100 + 16)) ? 1 : 0;
+  printf("  scatter 100: %d px of ink beyond the brush radius\n", outside);
+  CHECK(outside > 20);
+  e.settings = ToolSettings();
+}
+
 static void testShapesAndLasso(Engine &e) {
   section("shape tool (line/rect/ellipse) + lasso selection");
   e.newDocument(400, 300, 12);
@@ -1007,6 +1030,7 @@ int main(int argc, char **argv) {
   testSaveLoad(e);
   testWorkerThreadSave(e);
   testProBrush(e);
+  testTexture(e);
   testShapesAndLasso(e);
   testTiming(e);
   testKeyframes(e);

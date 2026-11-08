@@ -98,4 +98,26 @@
     <string name="audio_failed">Falha ao importar áudio: %1$s</string>
     <string name="audio_imported">Áudio importado (%1$.1f s)</string>
     <string name="audio_settings">Configurações de áudio</string>
+    <string name="add_vector_layer">Adicionar camada vetorial</string>
+    <string name="parent">Pai</string>
+    <string name="none">Nenhum</string>
+    <string name="effects">Efeitos</string>
+    <string name="blur">Desfoque</string>
+    <string name="glow">Brilho</string>
+    <string name="glow_intensity">Intensidade do brilho</string>
+    <string name="shadow_x">Sombra X</string>
+    <string name="shadow_y">Sombra Y</string>
+    <string name="shadow_blur">Desfoque da sombra</string>
+    <string name="shadow_opacity">Opacidade da sombra</string>
+    <string name="brightness">Luminosidade</string>
+    <string name="contrast">Contraste</string>
+    <string name="set_pivot">Definir pivô (toque)</string>
+    <string name="grain">Granulado</string>
+    <string name="scatter">Dispersão</string>
+    <string name="import_tnz">Importar cena do OpenToonz (.tnz)</string>
+    <string name="import_tnz_choose">Escolha a cena</string>
+    <string name="import_notes">Importado. Observações:</string>
+    <string name="copying">Copiando pasta…</string>
+    <string name="no_tnz">Nenhuma cena .tnz encontrada nessa pasta</string>
+    <string name="vector">Vetorial</string>
 </resources>

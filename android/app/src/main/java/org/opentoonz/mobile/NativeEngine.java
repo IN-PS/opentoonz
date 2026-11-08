@@ -20,7 +20,7 @@ public final class NativeEngine {
     public static final int CAMERA = -1;
     public static final int FILL_AREAS = 0, FILL_LINES = 1, FILL_ALL = 2;
     public static final int ERASE_ALL = 0, ERASE_LINES = 1, ERASE_AREAS = 2;
-    public static final int LAYER_TOONZ_RASTER = 0, LAYER_RASTER = 1;
+    public static final int LAYER_TOONZ_RASTER = 0, LAYER_RASTER = 1, LAYER_VECTOR = 2;
 
     private static boolean sLoaded;
 
@@ -140,4 +140,19 @@ public final class NativeEngine {
     public static native void setKeyLive(int layer, int row, float[] xform, int ease);
     public static native void endKeyEdit();
     public static native int[] getKeyRows(int layer);
+
+    // v0.3: vector layers, peg hierarchy, effects, textured brush, .tnz import
+    public static native int addLayerType(int type);
+    public static native boolean setParent(int layer, int parent);   // parent -1 = none
+    public static native int getParent(int layer);
+    public static native void setPivot(int layer, float x, float y);
+    public static native float[] getPivot(int layer);
+    public static native float[] canvasDeltaToLocal(int layer, int row, float dx, float dy);
+    /** 17 values, see jni_bridge.cpp (blur, glow..., hue). */
+    public static native int[] getLayerFx(int layer);
+    public static native void setLayerFx(int layer, int[] fx);
+    public static native void setBrushTexture(int grain, int scatter);
+    /** Opens a desktop OpenToonz scene; null on success, else an error. */
+    public static native String importTnz(String tnzPath);
+    public static native String[] getImportWarnings();
 }

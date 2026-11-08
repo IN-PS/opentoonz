@@ -555,3 +555,79 @@ JF(jintArray, getKeyRows)(JNIEnv *env, jclass, jint layer) {
   env->SetIntArrayRegion(a, 0, (jsize)v.size(), v.data());
   return a;
 }
+
+// ------------------------------------------------------------------ v0.3
+JF(jint, addLayerType)(JNIEnv *, jclass, jint type) { return E().addLayerOfType(type); }
+JF(jboolean, setParent)(JNIEnv *, jclass, jint layer, jint parent) {
+  return E().setParent(layer, parent);
+}
+JF(jint, getParent)(JNIEnv *, jclass, jint layer) { return E().parentOf(layer); }
+JF(void, setPivot)(JNIEnv *, jclass, jint layer, jfloat x, jfloat y) {
+  E().setPivot(layer, x, y);
+}
+static jfloatArray floats2(JNIEnv *env, double a, double b) {
+  jfloat v[2] = {(jfloat)a, (jfloat)b};
+  jfloatArray r = env->NewFloatArray(2);
+  env->SetFloatArrayRegion(r, 0, 2, v);
+  return r;
+}
+JF(jfloatArray, getPivot)(JNIEnv *env, jclass, jint layer) {
+  std::lock_guard<std::recursive_mutex> lk(E().mutex());
+  TPointD p = E().pivotOf(layer);
+  return floats2(env, p.x, p.y);
+}
+JF(jfloatArray, canvasDeltaToLocal)(JNIEnv *env, jclass, jint layer, jint row,
+                                    jfloat dx, jfloat dy) {
+  std::lock_guard<std::recursive_mutex> lk(E().mutex());
+  TPointD d = E().canvasDeltaToLocal(layer, row, dx, dy);
+  return floats2(env, d.x, d.y);
+}
+//! effects as 17 ints: blur, glow, glowIntensity, glowR,G,B, shadowDx, Dy,
+//! shadowBlur, shadowOpacity, shadowR,G,B, brightness, contrast, saturation, hue
+JF(jintArray, getLayerFx)(JNIEnv *env, jclass, jint layer) {
+  std::lock_guard<std::recursive_mutex> lk(E().mutex());
+  LayerFx f   = E().layerFx(layer);
+  jint v[17] = {f.blur, f.glow, f.glowIntensity, f.glowColor.r, f.glowColor.g,
+                f.glowColor.b, f.shadowDx, f.shadowDy, f.shadowBlur, f.shadowOpacity,
+                f.shadowColor.r, f.shadowColor.g, f.shadowColor.b, f.brightness,
+                f.contrast, f.saturation, f.hue};
+  jintArray a = env->NewIntArray(17);
+  env->SetIntArrayRegion(a, 0, 17, v);
+  return a;
+}
+JF(void, setLayerFx)(JNIEnv *env, jclass, jint layer, jintArray vals) {
+  jint v[17] = {0};
+  env->GetIntArrayRegion(vals, 0, std::min<jsize>(17, env->GetArrayLength(vals)), v);
+  LayerFx f;
+  f.blur = std::max(0, std::min(100, (int)v[0]));
+  f.glow = std::max(0, std::min(100, (int)v[1]));
+  f.glowIntensity = std::max(0, std::min(300, (int)v[2]));
+  f.glowColor = TPixel32(v[3] & 255, v[4] & 255, v[5] & 255);
+  f.shadowDx = v[6], f.shadowDy = v[7];
+  f.shadowBlur = std::max(0, std::min(100, (int)v[8]));
+  f.shadowOpacity = std::max(0, std::min(100, (int)v[9]));
+  f.shadowColor = TPixel32(v[10] & 255, v[11] & 255, v[12] & 255);
+  f.brightness = std::max(-100, std::min(100, (int)v[13]));
+  f.contrast = std::max(-100, std::min(100, (int)v[14]));
+  f.saturation = std::max(-100, std::min(100, (int)v[15]));
+  f.hue = std::max(-180, std::min(180, (int)v[16]));
+  E().setLayerFx(layer, f);
+}
+JF(void, setBrushTexture)(JNIEnv *, jclass, jint grain, jint scatter) {
+  std::lock_guard<std::recursive_mutex> lk(E().mutex());
+  E().settings.grain   = std::max(0, std::min(100, (int)grain));
+  E().settings.scatter = std::max(0, std::min(100, (int)scatter));
+}
+static std::vector<std::string> g_importWarnings;
+JF(jstring, importTnz)(JNIEnv *env, jclass, jstring path) {
+  std::string err;
+  bool ok = E().importTnz(str(env, path), &g_importWarnings, &err);
+  return errOrNull(env, ok, err);
+}
+JF(jobjectArray, getImportWarnings)(JNIEnv *env, jclass) {
+  jobjectArray a = env->NewObjectArray((jsize)g_importWarnings.size(),
+                                       env->FindClass("java/lang/String"), nullptr);
+  for (size_t i = 0; i < g_importWarnings.size(); i++)
+    env->SetObjectArrayElement(a, (jsize)i, env->NewStringUTF(g_importWarnings[i].c_str()));
+  return a;
+}

@@ -99,4 +99,26 @@
     <string name="audio_failed">Audio import failed: %1$s</string>
     <string name="audio_imported">Audio imported (%1$.1f s)</string>
     <string name="audio_settings">Audio settings</string>
+    <string name="add_vector_layer">Add vector layer</string>
+    <string name="parent">Parent</string>
+    <string name="none">None</string>
+    <string name="effects">Effects</string>
+    <string name="blur">Blur</string>
+    <string name="glow">Glow</string>
+    <string name="glow_intensity">Glow intensity</string>
+    <string name="shadow_x">Shadow X</string>
+    <string name="shadow_y">Shadow Y</string>
+    <string name="shadow_blur">Shadow blur</string>
+    <string name="shadow_opacity">Shadow opacity</string>
+    <string name="brightness">Brightness</string>
+    <string name="contrast">Contrast</string>
+    <string name="set_pivot">Set pivot (tap)</string>
+    <string name="grain">Grain</string>
+    <string name="scatter">Scatter</string>
+    <string name="import_tnz">Import OpenToonz scene (.tnz)</string>
+    <string name="import_tnz_choose">Choose the scene</string>
+    <string name="import_notes">Imported. Notes:</string>
+    <string name="copying">Copying folder…</string>
+    <string name="no_tnz">No .tnz scene found in that folder</string>
+    <string name="vector">Vector</string>
 </resources>

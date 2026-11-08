@@ -34,6 +34,7 @@ final class ProjectAudio {
     static final String WAV = "audio.wav", PROPS = "audio.properties";
 
     final File dir;
+    final String name;     // track file base name: audio, audio_2, ...
     int offsetFrames;      // animation frame where the sound starts
     float volume = 1f;
     // WAV info
@@ -42,16 +43,50 @@ final class ProjectAudio {
 
     private MediaPlayer mPlayer;
 
-    private ProjectAudio(File dir) { this.dir = dir; }
+    private ProjectAudio(File dir, String name) { this.dir = dir; this.name = name; }
 
-    File wavFile() { return new File(dir, WAV); }
+    File wavFile() { return new File(dir, name + ".wav"); }
+    File propsFile() { return new File(dir, name + ".properties"); }
 
-    /** Loads the project's sound track, or null if it has none. */
+    /** The first sound track (kept for compatibility), or null. */
     static ProjectAudio load(File projectDir) {
-        ProjectAudio a = new ProjectAudio(projectDir);
+        List<ProjectAudio> all = loadAll(projectDir);
+        return all.isEmpty() ? null : all.get(0);
+    }
+
+    /** All sound tracks of a project (audio.wav, audio_2.wav, ...), in order. */
+    static List<ProjectAudio> loadAll(File projectDir) {
+        List<ProjectAudio> res = new ArrayList<>();
+        String[] files = projectDir.list();
+        if (files == null) return res;
+        java.util.Arrays.sort(files, new java.util.Comparator<String>() {
+            @Override public int compare(String a, String b) { return trackIndex(a) - trackIndex(b); }
+        });
+        for (String f : files)
+            if (f.matches("audio(_\\d+)?\\.wav")) {
+                ProjectAudio a = loadTrack(projectDir, f.substring(0, f.length() - 4));
+                if (a != null) res.add(a);
+            }
+        return res;
+    }
+
+    private static int trackIndex(String file) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("audio_(\\d+)\\.wav").matcher(file);
+        return m.matches() ? Integer.parseInt(m.group(1)) : file.equals("audio.wav") ? 1 : 100000;
+    }
+
+    static String nextTrackName(File projectDir) {
+        if (!new File(projectDir, "audio.wav").exists()) return "audio";
+        int i = 2;
+        while (new File(projectDir, "audio_" + i + ".wav").exists()) i++;
+        return "audio_" + i;
+    }
+
+    static ProjectAudio loadTrack(File projectDir, String name) {
+        ProjectAudio a = new ProjectAudio(projectDir, name);
         if (!a.wavFile().exists()) return null;
         Properties p = new Properties();
-        try (InputStream in = new FileInputStream(new File(projectDir, PROPS))) {
+        try (InputStream in = new FileInputStream(a.propsFile())) {
             p.load(in);
         } catch (IOException ignored) {
         }
@@ -69,14 +104,15 @@ final class ProjectAudio {
         Properties p = new Properties();
         p.setProperty("offsetFrames", String.valueOf(offsetFrames));
         p.setProperty("volume", String.valueOf(volume));
-        try (OutputStream out = new FileOutputStream(new File(dir, PROPS))) {
+        try (OutputStream out = new FileOutputStream(propsFile())) {
             p.store(out, "OpenToonz Mobile sound track");
         }
     }
 
-    static void remove(File projectDir) {
-        new File(projectDir, WAV).delete();
-        new File(projectDir, PROPS).delete();
+    void removeFiles() {
+        release();
+        wavFile().delete();
+        propsFile().delete();
     }
 
     double durationSec() {
@@ -165,9 +201,10 @@ final class ProjectAudio {
     // ------------------------------------------------------------ import
     /** Decodes any audio file Android can read into the project's WAV. */
     static String importFrom(Context ctx, Uri uri, File projectDir) {
+        String name = nextTrackName(projectDir);
         MediaExtractor ex = new MediaExtractor();
         MediaCodec dec = null;
-        File tmp = new File(projectDir, WAV + ".tmp");
+        File tmp = new File(projectDir, name + ".wav.tmp");
         try {
             ex.setDataSource(ctx, uri, null);
             int track = -1;
@@ -226,10 +263,10 @@ final class ProjectAudio {
                 writeWavHeader(out, rate, ch, total);
             }
             if (total == 0) return "decoder produced no samples";
-            File wav = new File(projectDir, WAV);
+            File wav = new File(projectDir, name + ".wav");
             wav.delete();
             if (!tmp.renameTo(wav)) return "cannot store the audio file";
-            ProjectAudio a = new ProjectAudio(projectDir);
+            ProjectAudio a = new ProjectAudio(projectDir, name);
             a.saveProps();
             return null;
         } catch (IOException | RuntimeException e) {
@@ -278,6 +315,60 @@ final class ProjectAudio {
 
     void release() {
         if (mPlayer != null) { mPlayer.release(); mPlayer = null; }
+    }
+
+    // ------------------------------------------------------------ mixing
+    /** Reads the track as mono/stereo 16-bit samples (interleaved). */
+    short[] readPcm() throws IOException {
+        short[] pcm = new short[(int) (dataBytes / 2)];
+        try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(wavFile())))) {
+            in.skipBytes((int) dataOffset);
+            byte[] b = new byte[(int) dataBytes];
+            in.readFully(b);
+            for (int i = 0; i < pcm.length; i++) pcm[i] = (short) ((b[2 * i] & 0xFF) | (b[2 * i + 1] << 8));
+        }
+        return pcm;
+    }
+
+    /**
+     * Mixes all tracks (start frame, volume) into one 44.1 kHz stereo WAV the
+     * length of the animation; used for the MP4 export.  Returns null when
+     * there is nothing audible.
+     */
+    static ProjectAudio mix(List<ProjectAudio> tracks, int frames, int fps, File outDir) throws IOException {
+        if (tracks == null || tracks.isEmpty()) return null;
+        final int rate = 44100;
+        int total = (int) ((long) frames * rate / fps);
+        float[] l = new float[total], r = new float[total];
+        boolean any = false;
+        for (ProjectAudio t : tracks) {
+            short[] pcm = t.readPcm();
+            int ch = Math.max(1, t.channels);
+            int n = pcm.length / ch;
+            long start = (long) t.offsetFrames * rate / fps;
+            for (int i = 0; i < total; i++) {
+                double src = (i - start) * (double) t.sampleRate / rate;  // linear resampling
+                if (src < 0 || src >= n - 1) continue;
+                int k = (int) src;
+                double f = src - k;
+                float sl = (float) (pcm[k * ch] * (1 - f) + pcm[(k + 1) * ch] * f);
+                float sr = ch > 1 ? (float) (pcm[k * ch + 1] * (1 - f) + pcm[(k + 1) * ch + 1] * f) : sl;
+                l[i] += sl * t.volume;
+                r[i] += sr * t.volume;
+                any = true;
+            }
+        }
+        if (!any) return null;
+        short[] out = new short[total * 2];
+        for (int i = 0; i < total; i++) {
+            out[2 * i] = (short) Math.max(-32768, Math.min(32767, Math.round(l[i])));
+            out[2 * i + 1] = (short) Math.max(-32768, Math.min(32767, Math.round(r[i])));
+        }
+        File wav = new File(outDir, "mixdown.wav");
+        writeWav(wav, out, rate, 2);
+        ProjectAudio m = new ProjectAudio(outDir, "mixdown");
+        m.readHeader();
+        return m;
     }
 
     // ------------------------------------------------------------ AAC for MP4

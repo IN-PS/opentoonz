@@ -14,6 +14,9 @@
 
 namespace otm {
 
+//! Canvas pixels per vector (Stage) unit.
+double vectorPxPerUnit(const Document &doc);
+
 //! Draws \b vi over \b out (premultiplied BGRM). \b aff maps image space to
 //! \b out pixels. \b colorScale tints like OpenToonz onion skin.
 void rasterizeVector(const Document &doc, const TVectorImageP &vi,

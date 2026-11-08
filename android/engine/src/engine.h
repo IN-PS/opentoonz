@@ -33,6 +33,9 @@ public:
   Document *doc() const { return m_doc.get(); }
   bool save(const std::string &dir, std::string *error = nullptr);
   bool load(const std::string &dir, std::string *error = nullptr);
+  //! Opens a desktop OpenToonz scene (.tnz); warnings list what was skipped.
+  bool importTnz(const std::string &tnzPath, std::vector<std::string> *warnings,
+                 std::string *error);
   std::string projectDir() const { return m_projectDir; }
 
   // rendering ----------------------------------------------------------

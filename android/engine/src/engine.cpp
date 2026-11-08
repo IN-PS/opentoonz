@@ -3,6 +3,7 @@
 #include "gifencoder.h"
 #include "projectio.h"
 #include "vector.h"
+#include "tnzimport.h"
 #include "tiio_pli.h"
 
 #include "tfiletype.h"
@@ -168,6 +169,26 @@ bool Engine::load(const std::string &dir, std::string *error) {
   m_frame      = TRaster32P(m_doc->width(), m_doc->height());
   m_projectDir = dir;
   m_doc->dirty = false;
+  return true;
+}
+
+bool Engine::importTnz(const std::string &tnzPath, std::vector<std::string> *warnings,
+                       std::string *error) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  TnzImportResult r = otm::importTnz(tnzPath);
+  if (warnings) *warnings = r.warnings;
+  if (!r.doc) {
+    if (error) *error = r.error;
+    return false;
+  }
+  TUndoManager::manager()->reset();
+  m_stroke.reset();
+  m_vstroke.reset();
+  m_doc = std::move(r.doc);
+  m_selection.reset(new Selection(m_doc.get()));
+  m_vsel.reset(new VectorSelection(m_doc.get()));
+  m_frame = TRaster32P(m_doc->width(), m_doc->height());
+  m_projectDir.clear();
   return true;
 }
 

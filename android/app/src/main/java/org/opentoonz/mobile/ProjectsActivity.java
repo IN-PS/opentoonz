@@ -34,6 +34,7 @@ public class ProjectsActivity extends Activity {
             "1280×720 (HD)", "1920×1080 (Full HD)", "720×720 (square)", "540×960 (vertical)"};
     static final int[] FPS = {8, 12, 15, 24, 25, 30};
 
+    static final int REQ_TNZ_TREE = 11;
     private GridLayout mGrid;
     private TextView mEmpty;
 
@@ -58,6 +59,13 @@ public class ProjectsActivity extends Activity {
             @Override public void onClick(View v) { newProjectDialog(); }
         });
         bar.addView(add);
+        ImageButton imp = Ui.iconButton(this, R.drawable.ic_layers, getString(R.string.import_tnz), 48);
+        imp.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQ_TNZ_TREE);
+            }
+        });
+        bar.addView(imp);
         root.addView(bar);
 
         FrameLayout body = new FrameLayout(this);
@@ -211,5 +219,120 @@ public class ProjectsActivity extends Activity {
                         open(dir, true);
                     }
                 }).setNegativeButton(R.string.cancel, null).show();
+    }
+
+    // ------------------------------------------------------------ .tnz import
+    @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req != REQ_TNZ_TREE || res != RESULT_OK || data == null || data.getData() == null) return;
+        final android.net.Uri tree = data.getData();
+        final android.app.ProgressDialog pd = android.app.ProgressDialog.show(this, null,
+                getString(R.string.copying), true, false);
+        final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final File dest = new File(getCacheDir(), "tnzimport");
+                ProjectStore.deleteRecursive(dest);
+                dest.mkdirs();
+                String err = null;
+                try {
+                    String rootId = android.provider.DocumentsContract.getTreeDocumentId(tree);
+                    copyTree(tree, rootId, dest, 0);
+                } catch (Exception e) {
+                    err = e.toString();
+                }
+                final List<File> scenes = new java.util.ArrayList<>();
+                findTnz(dest, scenes);
+                final String fErr = err;
+                ui.post(new Runnable() {
+                    @Override public void run() {
+                        pd.dismiss();
+                        if (fErr != null || scenes.isEmpty()) {
+                            new AlertDialog.Builder(ProjectsActivity.this)
+                                    .setMessage(fErr != null ? fErr : getString(R.string.no_tnz)).show();
+                            return;
+                        }
+                        if (scenes.size() == 1) { importScene(scenes.get(0)); return; }
+                        String[] names = new String[scenes.size()];
+                        for (int i = 0; i < names.length; i++)
+                            names[i] = scenes.get(i).getAbsolutePath().substring(dest.getAbsolutePath().length() + 1);
+                        new AlertDialog.Builder(ProjectsActivity.this).setTitle(R.string.import_tnz_choose)
+                                .setItems(names, new DialogInterface.OnClickListener() {
+                                    @Override public void onClick(DialogInterface d, int which) {
+                                        importScene(scenes.get(which));
+                                    }
+                                }).show();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void copyTree(android.net.Uri tree, String docId, File dest, int depth) throws java.io.IOException {
+        if (depth > 6) return;
+        android.net.Uri children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId);
+        String[] cols = {android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE};
+        try (android.database.Cursor c = getContentResolver().query(children, cols, null, null, null)) {
+            while (c != null && c.moveToNext()) {
+                String id = c.getString(0), name = c.getString(1), mime = c.getString(2);
+                if (name == null || name.startsWith(".")) continue;
+                File f = new File(dest, name);
+                if (android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
+                    f.mkdirs();
+                    copyTree(tree, id, f, depth + 1);
+                } else {
+                    String lower = name.toLowerCase(java.util.Locale.ROOT);
+                    if (!(lower.endsWith(".tnz") || lower.endsWith(".tlv") || lower.endsWith(".tpl")
+                            || lower.endsWith(".pli") || lower.endsWith(".png"))) continue;
+                    android.net.Uri u = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, id);
+                    try (java.io.InputStream in = getContentResolver().openInputStream(u);
+                         java.io.OutputStream out = new java.io.FileOutputStream(f)) {
+                        byte[] buf = new byte[1 << 16];
+                        int n;
+                        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                    }
+                }
+            }
+        }
+    }
+
+    static void findTnz(File dir, List<File> out) {
+        File[] kids = dir.listFiles();
+        if (kids == null) return;
+        for (File k : kids) {
+            if (k.isDirectory()) findTnz(k, out);
+            else if (k.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".tnz")) out.add(k);
+        }
+    }
+
+    void importScene(final File tnz) {
+        String err = NativeEngine.importTnz(tnz.getAbsolutePath());
+        if (err != null) {
+            new AlertDialog.Builder(this).setMessage(getString(R.string.load_failed, err)).show();
+            return;
+        }
+        String name = tnz.getName().replaceAll("\\.tnz$", "");
+        final File dir = ProjectStore.newFolder(this, name);
+        NativeEngine.setName(dir.getName());
+        err = NativeEngine.save(dir.getAbsolutePath());
+        if (err != null) {
+            new AlertDialog.Builder(this).setMessage(getString(R.string.save_failed, err)).show();
+            return;
+        }
+        ProjectStore.writeThumbnail(dir);
+        String[] notes = NativeEngine.getImportWarnings();
+        if (notes.length == 0) {
+            open(dir, false);
+            return;
+        }
+        StringBuilder sb = new StringBuilder(getString(R.string.import_notes));
+        for (String n : notes) sb.append("\n\u2022 ").append(n);
+        new AlertDialog.Builder(this).setMessage(sb.toString())
+                .setPositiveButton(R.string.open, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) { open(dir, false); }
+                }).show();
     }
 }

@@ -36,8 +36,13 @@ public class LayerPanel extends LinearLayout {
         addRaster.setOnClickListener(new OnClickListener() {
             @Override public void onClick(View v) { NativeEngine.addLayer(true); changed(); }
         });
+        ImageButton addVector = Ui.iconButton(c, R.drawable.ic_vector, c.getString(R.string.add_vector_layer), 40);
+        addVector.setOnClickListener(new OnClickListener() {
+            @Override public void onClick(View v) { NativeEngine.addLayerType(NativeEngine.LAYER_VECTOR); changed(); }
+        });
         head.addView(addToonz);
         head.addView(addRaster);
+        head.addView(addVector);
         addView(head);
         ScrollView sv = new ScrollView(c);
         mList = new LinearLayout(c);
@@ -82,7 +87,11 @@ public class LayerPanel extends LinearLayout {
                     changed();
                 }
             });
-            String type = NativeEngine.getLayerType(i) == NativeEngine.LAYER_RASTER ? "Raster" : "Toonz Raster";
+            int lt = NativeEngine.getLayerType(i);
+            String type = lt == NativeEngine.LAYER_RASTER ? "Raster"
+                    : lt == NativeEngine.LAYER_VECTOR ? c.getString(R.string.vector) : "Toonz Raster";
+            int par = NativeEngine.getParent(i);
+            if (par >= 0) type += "  \u2192 " + NativeEngine.getLayerName(par);
             TextView name = Ui.label(c, NativeEngine.getLayerName(i), 14);
             name.setSingleLine(true);
             TextView badge = Ui.label(c, type, 10);
@@ -134,6 +143,45 @@ public class LayerPanel extends LinearLayout {
                 ops.addView(down);
                 ops.addView(del);
                 row.addView(ops);
+                // peg hierarchy: parent selector + effects
+                LinearLayout rig = new LinearLayout(c);
+                rig.setGravity(Gravity.CENTER_VERTICAL);
+                rig.addView(Ui.label(c, c.getString(R.string.parent), 13));
+                final android.widget.Spinner parentSp = new android.widget.Spinner(c);
+                final int n2 = NativeEngine.getLayerCount();
+                final java.util.List<Integer> choices = new java.util.ArrayList<>();
+                java.util.List<String> labels = new java.util.ArrayList<>();
+                choices.add(-1);
+                labels.add(c.getString(R.string.none));
+                for (int k = 0; k < n2; k++)
+                    if (k != idx) { choices.add(k); labels.add(NativeEngine.getLayerName(k)); }
+                parentSp.setAdapter(new android.widget.ArrayAdapter<>(c,
+                        android.R.layout.simple_spinner_dropdown_item, labels));
+                parentSp.setSelection(Math.max(0, choices.indexOf(NativeEngine.getParent(idx))));
+                parentSp.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+                    @Override public void onItemSelected(android.widget.AdapterView<?> a, View v, int pos, long id) {
+                        int want = choices.get(pos);
+                        if (want != NativeEngine.getParent(idx)) {
+                            if (!NativeEngine.setParent(idx, want))
+                                android.widget.Toast.makeText(c, "\u21BB", android.widget.Toast.LENGTH_SHORT).show();
+                            changed();
+                        }
+                    }
+                    @Override public void onNothingSelected(android.widget.AdapterView<?> a) {}
+                });
+                rig.addView(parentSp, new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
+                android.widget.Button fxb = new android.widget.Button(c);
+                fxb.setText(R.string.effects);
+                fxb.setContentDescription(c.getString(R.string.effects));
+                fxb.setOnClickListener(new OnClickListener() {
+                    @Override public void onClick(View v) {
+                        FxDialog.show(c, idx, new FxDialog.Done() {
+                            @Override public void onApplied() { changed(); }
+                        });
+                    }
+                });
+                rig.addView(fxb);
+                row.addView(rig);
             }
             mList.addView(row, lp);
         }

@@ -257,6 +257,7 @@ add_library(otm_core STATIC
   src/projectio.cpp
   src/gifencoder.cpp
   src/vector.cpp
+  src/tnzimport.cpp
   src/engine.cpp)
 target_include_directories(otm_core PUBLIC src)
 target_link_libraries(otm_core PUBLIC otm_opentoonz)

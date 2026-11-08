@@ -115,6 +115,8 @@ public class CanvasView extends View {
     public void setLasso(boolean lasso) { mLasso = lasso; }
     public void setCameraTarget(boolean camera) { mCameraTarget = camera; }
     public void setEase(int ease) { mEase = ease; }
+    private boolean mPivotMode;
+    public void setPivotMode(boolean on) { mPivotMode = on; invalidate(); }
     public void setOnion(boolean on) { mOnion = on; renderAll(); }
     public void setPlaying(boolean p) { mPlaying = p; }
     public boolean isStylusMode() { return mStylusSeen; }
@@ -208,6 +210,17 @@ public class CanvasView extends View {
         } else if (NativeEngine.hasSelection()) {
             int[] b = NativeEngine.selectionBounds();
             if (b[2] >= b[0]) c.drawRect(b[0], b[1], b[2] + 1, b[3] + 1, mSelPaint);
+        }
+        if (mTool == NativeEngine.TOOL_TRANSFORM && !mCameraTarget) {  // pivot marker
+            float[] pv = NativeEngine.getPivot(NativeEngine.getCurrentLayer());
+            android.graphics.Paint pp = new android.graphics.Paint(Paint.ANTI_ALIAS_FLAG);
+            pp.setStyle(Paint.Style.STROKE);
+            pp.setStrokeWidth(lw * 1.5f);
+            pp.setColor(mPivotMode ? 0xFFFF5252 : 0xFF2D8CFF);
+            float rr = Ui.dp(getContext(), 7) / viewScale();
+            c.drawCircle(pv[0], pv[1], rr, pp);
+            c.drawLine(pv[0] - 2 * rr, pv[1], pv[0] + 2 * rr, pv[1], pp);
+            c.drawLine(pv[0], pv[1] - 2 * rr, pv[0], pv[1] + 2 * rr, pp);
         }
         if (mHoverX >= 0 && (mTool == NativeEngine.TOOL_BRUSH || mTool == NativeEngine.TOOL_ERASER)) {
             mCursor.setStrokeWidth(lw * 0.7f);
@@ -309,6 +322,13 @@ public class CanvasView extends View {
             mState = SHAPE_DRAG;
             mShX0 = mShX1 = p[0];
             mShY0 = mShY1 = p[1];
+            return;
+        }
+        if (mTool == NativeEngine.TOOL_TRANSFORM && mPivotMode && !mCameraTarget) {
+            NativeEngine.setPivot(NativeEngine.getCurrentLayer(), p[0], p[1]);
+            mState = NONE;
+            renderAll();
+            changed();
             return;
         }
         if (mTool == NativeEngine.TOOL_TRANSFORM) {
@@ -425,9 +445,16 @@ public class CanvasView extends View {
                 float dx = p[0] - mXfDownX, dy = p[1] - mXfDownY;
                 float[] xf = mXfBase.clone();
                 // moving the camera right makes the scene go left: invert
-                float sign = mXfTarget == NativeEngine.CAMERA ? -1 : 1;
-                xf[0] += sign * dx;
-                xf[1] += sign * dy;
+                if (mXfTarget == NativeEngine.CAMERA) {
+                    // moving the camera right makes the scene go left: invert
+                    xf[0] -= dx;
+                    xf[1] -= dy;
+                } else {
+                    // a child layer moves in its parent's (rotated/scaled) frame
+                    float[] d = NativeEngine.canvasDeltaToLocal(mXfTarget, mRow, dx, dy);
+                    xf[0] += d[0];
+                    xf[1] += d[1];
+                }
                 NativeEngine.setKeyLive(mXfTarget, mRow, xf, mEase);
                 renderAll();
                 break;
@@ -442,8 +469,15 @@ public class CanvasView extends View {
                 float[] xf = mXfBase.clone();
                 boolean cam = mXfTarget == NativeEngine.CAMERA;
                 float sign = cam ? -1 : 1;
-                xf[0] += sign * ((a[0] + b[0]) / 2 - mGestStartCx);
-                xf[1] += sign * ((a[1] + b[1]) / 2 - mGestStartCy);
+                float gdx = (a[0] + b[0]) / 2 - mGestStartCx, gdy = (a[1] + b[1]) / 2 - mGestStartCy;
+                if (cam) {
+                    xf[0] -= gdx;
+                    xf[1] -= gdy;
+                } else {
+                    float[] d = NativeEngine.canvasDeltaToLocal(mXfTarget, mRow, gdx, gdy);
+                    xf[0] += d[0];
+                    xf[1] += d[1];
+                }
                 xf[2] += sign * dAng;
                 xf[3] = mXfBase[3] * ratio;  // camera: zoom follows the pinch
                 NativeEngine.setKeyLive(mXfTarget, mRow, xf, mEase);

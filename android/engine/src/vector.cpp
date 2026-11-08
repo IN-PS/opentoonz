@@ -10,10 +10,14 @@
 
 namespace otm {
 
-// Vector drawings use OpenToonz's convention of an origin at the canvas
-// centre; one unit = one canvas pixel.
+// Vector drawings use OpenToonz's convention: origin at the camera centre,
+// coordinates in Stage units (Stage::inch = 53.33333 units per inch).  The
+// mobile canvas is treated as a standard 16-inch-wide camera, so one unit is
+// width/(16*53.333) canvas pixels (2.25 px for 1920 wide, like desktop).
+static const double kStageInch = 53.33333;
+double vectorPxPerUnit(const Document &doc) { return doc.width() / (16.0 * kStageInch); }
 static TAffine imageToRaster(const Document &doc) {
-  return TTranslation(doc.width() * 0.5, doc.height() * 0.5);
+  return TTranslation(doc.width() * 0.5, doc.height() * 0.5) * TScale(vectorPxPerUnit(doc));
 }
 
 // ---------------------------------------------------------------- raster
@@ -196,7 +200,8 @@ static std::vector<int> doc_cells(Document *doc) {
 }
 
 static TPointD toImage(const Document &doc, const TPointD &p) {
-  return TPointD(p.x - doc.width() * 0.5, p.y - doc.height() * 0.5);
+  double k = vectorPxPerUnit(doc);
+  return TPointD((p.x - doc.width() * 0.5) / k, (p.y - doc.height() * 0.5) / k);
 }
 
 static TVectorImageP currentVector(Document *doc, Layer **layerOut, int *drawingOut,
@@ -217,11 +222,13 @@ static TVectorImageP currentVector(Document *doc, Layer **layerOut, int *drawing
 VectorStroke::VectorStroke(Document *doc, const ToolSettings &s, Tool tool)
     : m_doc(doc), m_s(s), m_tool(tool) {}
 
+// thickness in Stage units (tool sizes are given in canvas pixels)
 double VectorStroke::thickness(double pressure) const {
-  if (m_tool == Tool::Eraser) return m_s.eraserSize;
-  if (!m_s.pressure) return m_s.brushMax;
+  double k = vectorPxPerUnit(*m_doc);
+  if (m_tool == Tool::Eraser) return m_s.eraserSize / k;
+  if (!m_s.pressure) return m_s.brushMax / k;
   double t = pressure * pressure * pressure;
-  return m_s.brushMin + (m_s.brushMax - m_s.brushMin) * t;
+  return (m_s.brushMin + (m_s.brushMax - m_s.brushMin) * t) / k;
 }
 
 bool VectorStroke::begin(const TPointD &rp, double pressure) {
@@ -252,7 +259,9 @@ void VectorStroke::move(const TPointD &rp, double pressure) {
     eraseAt(p);
     return;
   }
-  if (!m_pts.empty() && tdistance(TPointD(m_pts.back().x, m_pts.back().y), p) < 1.0) return;
+  if (!m_pts.empty() &&
+      tdistance(TPointD(m_pts.back().x, m_pts.back().y), p) * vectorPxPerUnit(*m_doc) < 1.0)
+    return;
   m_pts.push_back(TThickPoint(p, thickness(m_spPressure)));
   updatePreview();
 }
@@ -275,7 +284,7 @@ void VectorStroke::updatePreview() {
 }
 
 void VectorStroke::eraseAt(const TPointD &p) {
-  double r = m_s.eraserSize * 0.5;
+  double r = m_s.eraserSize * 0.5 / vectorPxPerUnit(*m_doc);
   for (int i = (int)m_vi->getStrokeCount() - 1; i >= 0; i--) {
     TStroke *s = m_vi->getStroke(i);
     double w, d2;
@@ -324,7 +333,7 @@ bool vectorAddShape(Document *doc, const ToolSettings &s,
   if (!vi || rpts.size() < 2) return false;
   TVectorImageP before = vi->clone();
   std::vector<TThickPoint> pts;
-  for (auto &p : rpts) pts.push_back(TThickPoint(toImage(*doc, p), s.brushMax));
+  for (auto &p : rpts) pts.push_back(TThickPoint(toImage(*doc, p), s.brushMax / vectorPxPerUnit(*doc)));
   TStroke *st = TStroke::interpolate(pts, 0.5, true);
   if (!st) return false;
   st->setStyle(doc->currentStyle);
@@ -351,7 +360,7 @@ bool vectorFill(Document *doc, const TPointD &rp, bool emptyOnly) {
     for (int i = (int)vi->getStrokeCount() - 1; i >= 0; i--) {
       TStroke *s = vi->getStroke(i);
       double w, d2;
-      if (s->getNearestW(p, w, d2) && std::sqrt(d2) <= s->getThickPoint(w).thick * 0.5 + 2) {
+      if (s->getNearestW(p, w, d2) && std::sqrt(d2) <= s->getThickPoint(w).thick * 0.5 + 2 / vectorPxPerUnit(*doc)) {
         s->setStyle(doc->currentStyle);
         old = 1;
         break;
@@ -371,7 +380,7 @@ int vectorPick(Document *doc, const TPointD &rp) {
   for (int i = (int)vi->getStrokeCount() - 1; i >= 0; i--) {
     TStroke *s = vi->getStroke(i);
     double w, d2;
-    if (s->getNearestW(p, w, d2) && std::sqrt(d2) <= s->getThickPoint(w).thick * 0.5 + 2)
+    if (s->getNearestW(p, w, d2) && std::sqrt(d2) <= s->getThickPoint(w).thick * 0.5 + 2 / vectorPxPerUnit(*doc))
       return s->getStyle();
   }
   if (TRegion *r = vi->getRegion(p)) return r->getStyle();
@@ -424,7 +433,8 @@ void VectorSelection::apply(const TAffine &a) {
 
 void VectorSelection::setTransform(double dx, double dy, double scale, double angle) {
   if (!m_active) return;
-  apply(TTranslation(m_centre + TPointD(dx, dy)) * TRotation(angle) *
+  double k = vectorPxPerUnit(*m_doc);  // drag is in canvas pixels
+  apply(TTranslation(m_centre + TPointD(dx / k, dy / k)) * TRotation(angle) *
         TScale(std::max(0.05, std::min(20.0, scale))) * TTranslation(-m_centre));
 }
 
@@ -437,7 +447,7 @@ TRectD VectorSelection::bounds() const {
       b         = first ? sb : b + sb;
       first     = false;
     }
-  return b + TPointD(m_doc->width() * 0.5, m_doc->height() * 0.5);
+  return imageToRaster(*m_doc) * b;
 }
 
 void VectorSelection::commit() {

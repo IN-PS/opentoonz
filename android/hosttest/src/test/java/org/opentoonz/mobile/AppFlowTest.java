@@ -610,7 +610,10 @@ public class AppFlowTest {
         TimelineView tl = find(a.getWindow().getDecorView(), TimelineView.class).get(0);
         java.lang.reflect.Field fp = TimelineView.class.getDeclaredField("mAudioPeaks");
         fp.setAccessible(true);
-        float[] peaks = (float[]) fp.get(tl);
+        @SuppressWarnings("unchecked")
+        java.util.List<float[]> tracks = (java.util.List<float[]>) fp.get(tl);
+        assertEquals(1, tracks.size());
+        float[] peaks = tracks.get(0);
         assertNotNull("waveform shown in the timeline", peaks);
         log("audio: " + peaks.length + " frame peaks; frame1=" + peaks[0] + " frame12=" + peaks[peaks.length - 1]);
         assertEquals(NativeEngine.getFps(), peaks.length);       // 1 s
@@ -620,6 +623,103 @@ public class AppFlowTest {
         click(a, "Play");
         click(a, "Play");
         log("audio playback toggle OK");
+        c.pause().stop().destroy();
+    }
+
+    @Test
+    public void t11_vectorLayerFxRigAndTexture() throws Exception {
+        File dir = createProject("V03");
+        ActivityController<EditorActivity> c = openEditor(dir);
+        EditorActivity a = c.get();
+        CanvasView canvas = find(a.getWindow().getDecorView(), CanvasView.class).get(0);
+        // vector layer from the layer panel
+        click(a, "Layers");
+        click(a, "Add vector layer");
+        int v = NativeEngine.getCurrentLayer();
+        assertEquals(NativeEngine.LAYER_VECTOR, NativeEngine.getLayerType(v));
+        click(a, "Layers");
+        click(a, "Brush");
+        drag(canvas, line(100, 100, 500, 100, 30));
+        assertTrue("vector stroke rendered", dark(frame(0, false).getPixel(300, 100)));
+        click(a, "Shapes");
+        select(spinner(a, 0), NativeEngine.SHAPE_ELLIPSE);
+        drag(canvas, line(200, 200, 500, 450, 10));
+        click(a, "Fill");
+        NativeEngine.setCurrentStyle(7);
+        drag(canvas, new float[][]{{350, 325}, {350, 325}});
+        int fillPx = frame(0, false).getPixel(350, 325);
+        log(String.format("vector region fill from the UI = #%08X", fillPx));
+        assertTrue(Color.blue(fillPx) > 180 && Color.red(fillPx) < 90);
+        // effects dialog: drop shadow on the vector layer
+        click(a, "Layers");
+        click(a, "Effects");
+        AlertDialog fx = ShadowAlertDialog.getLatestAlertDialog();
+        NativeEngine.setLayerFx(v, new int[]{0, 0, 100, 255, 236, 150, 0, 30, 0, 80, 0, 0, 0, 0, 0, 0, 0});
+        fx.dismiss();
+        int sh = frame(0, false).getPixel(300, 130);
+        log(String.format("drop shadow 30 px below the vector line = #%08X", sh));
+        assertTrue(Color.red(sh) < 120);
+        // parent: toonz layer 0 follows the vector layer's key
+        assertTrue(NativeEngine.setParent(0, v));
+        assertTrue(!NativeEngine.setParent(v, 0));
+        NativeEngine.setKey(v, 0, new float[]{100, 0, 0, 1, 1}, NativeEngine.EASE_LINEAR);
+        NativeEngine.setCurrentLayer(0);
+        assertTrue(NativeEngine.getParent(0) == v);
+        // textured brush on the toonz raster layer
+        click(a, "Layers");
+        click(a, "Brush");
+        NativeEngine.setBrush(20, 20, false, true);
+        NativeEngine.setBrushTexture(90, 0);
+        NativeEngine.setKey(v, 0, new float[]{0, 0, 0, 1, 1}, NativeEngine.EASE_LINEAR);
+        drag(canvas, line(100, 500, 800, 500, 40));
+        Bitmap f = frame(0, false);
+        int min = 255, max = 0;
+        for (int x = 200; x < 700; x += 3) {
+            int g = Color.red(f.getPixel(x, 500));
+            min = Math.min(min, g);
+            max = Math.max(max, g);
+        }
+        log("grain brush: centre line values range " + min + ".." + max);
+        assertTrue("textured stroke is not uniform", max - min > 40);
+        saveAndWait(a);
+        assertTrue(new File(dir, "levels").list().length >= 2);
+        c.pause().stop().destroy();
+    }
+
+    @Test
+    public void t12_multipleAudioTracks() throws Exception {
+        File dir = createProject("Tracks");
+        short[] a1 = new short[22050], a2 = new short[11025];
+        for (int i = 0; i < a1.length; i++) a1[i] = 8000;
+        for (int i = 0; i < a2.length; i++) a2[i] = 10000;
+        ProjectAudio.writeWav(new File(dir, "audio.wav"), a1, 22050, 1);
+        ProjectAudio.writeWav(new File(dir, "audio_2.wav"), a2, 11025, 1);
+        for (String n : new String[]{"audio.wav", "audio_2.wav"})
+            org.robolectric.shadows.ShadowMediaPlayer.addMediaInfo(
+                    org.robolectric.shadows.util.DataSource.toDataSource(new File(dir, n).getAbsolutePath()),
+                    new org.robolectric.shadows.ShadowMediaPlayer.MediaInfo(1000, 0));
+        java.util.List<ProjectAudio> tracks = ProjectAudio.loadAll(dir);
+        assertEquals(2, tracks.size());
+        tracks.get(1).offsetFrames = 6;
+        tracks.get(1).saveProps();
+        ProjectAudio mix = ProjectAudio.mix(ProjectAudio.loadAll(dir), 24, 12,
+                RuntimeEnvironment.application.getCacheDir());
+        assertNotNull(mix);
+        short[] m = mix.readPcm();
+        log("mixdown: " + mix.sampleRate + " Hz, " + mix.channels + " ch, " + m.length / 2 + " frames");
+        assertEquals(44100, mix.sampleRate);
+        assertEquals(2 * 44100, m.length / 2);                    // 24 frames @ 12 fps = 2 s
+        assertTrue(Math.abs(m[2 * 100] - 8000) < 50);              // track 1 alone at t=0
+        int at = (int) (0.6 * 44100);                              // track 2 starts at frame 6 = 0.5 s
+        log("mix at 0.6 s = " + m[2 * at] + " (expected 8000 + 10000)");
+        assertTrue(Math.abs(m[2 * at] - 18000) < 50);
+        assertTrue(Math.abs(m[2 * (int) (1.2 * 44100)] - 10000) < 50);   // track 1 ended at 1 s
+        ActivityController<EditorActivity> c = openEditor(dir);
+        TimelineView tl = find(c.get().getWindow().getDecorView(), TimelineView.class).get(0);
+        java.lang.reflect.Field fp = TimelineView.class.getDeclaredField("mAudioPeaks");
+        fp.setAccessible(true);
+        assertEquals(2, ((java.util.List<?>) fp.get(tl)).size());
+        log("two audio tracks shown in the timeline; mixdown OK");
         c.pause().stop().destroy();
     }
 }
