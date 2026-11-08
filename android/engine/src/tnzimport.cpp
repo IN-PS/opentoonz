@@ -14,6 +14,7 @@
 #include "tsystem.h"
 #include "ttoonzimage.h"
 #include "tvectorimage.h"
+#include "tconvert.h"
 
 #include <QDir>
 #include <QFile>
@@ -390,8 +391,11 @@ TnzImportResult importTnz(const std::string &tnzPath) {
           TImageReader::load(TFilePath((fi.absolutePath() + "/" + fn).toStdWString()), img);
           TRasterImageP ri = img;
           if (!ri) continue;
-          TRaster32P src(ri->getRaster()->getSize());
-          TRop::convert(src, ri->getRaster());
+          TRaster32P src = ri->getRaster();  // already RGBA32 (8 bit PNG)
+          if (!src) {                         // 16 bit / grey PNG
+            src = TRaster32P(ri->getRaster()->getSize());
+            TRop::convert(src, ri->getRaster());
+          }
           TRaster32P out(W, H);
           out->clear();
           double sc = lr.dpix > 0 ? camDpi / lr.dpix : 1.0;
@@ -401,6 +405,10 @@ TnzImportResult importTnz(const std::string &tnzPath) {
         }
       } else
         return fail("format ." + ext.toStdString() + " not supported on mobile");
+    } catch (TException &e) {
+      return fail("read error: " + ::to_string(e.getMessage()));
+    } catch (std::exception &e) {
+      return fail(std::string("read error: ") + e.what());
     } catch (...) {
       return fail("read error");
     }

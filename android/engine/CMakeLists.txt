@@ -288,5 +288,6 @@ if(OTM_BUILD_TESTS AND NOT ANDROID)
   target_link_libraries(otm_tests PRIVATE otm_core)
   add_dependencies(otm_tests lzocompress lzodecompress)
   target_compile_definitions(otm_tests PRIVATE
-    OTM_TEST_LZO_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    OTM_TEST_LZO_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    OTM_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
 endif()

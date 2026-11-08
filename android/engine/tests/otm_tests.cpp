@@ -1012,6 +1012,54 @@ static void testGifQuantizer() {
   CHECK(exact);
 }
 
+
+// A scene written by the desktop OpenToonz libraries (tools/tnzcompat/mkscene):
+// camera 1920x1080 @12fps; col1 TLV "A" exposing 1,1,2,3,3 (horizontal line,
+// red on drawing 3); col2 PLI "B" closed square, filled blue on drawing 2
+// (rows 2-4); col3 PNG "C" hidden.
+static void testTnzImport(Engine &e) {
+  section("desktop .tnz import (scene saved by desktop toonzlib)");
+  std::vector<std::string> warn;
+  std::string err;
+  bool ok = e.importTnz(OTM_TEST_DATA_DIR "/desktop_scene/scenes/otmtest.tnz", &warn, &err);
+  for (auto &w : warn) printf("  warning: %s\n", w.c_str());
+  if (!ok) printf("  error: %s\n", err.c_str());
+  CHECK(ok);
+  if (!ok) return;
+  Document *d = e.doc();
+  printf("  %dx%d @%d fps, %d layers, %d rows\n", d->width(), d->height(), d->fps(),
+         d->layerCount(), d->frameCount());
+  CHECK(d->width() == 1920 && d->height() == 1080 && d->fps() == 12);
+  CHECK(d->layerCount() == 3 && d->frameCount() == 5);
+  if (d->layerCount() != 3) return;
+  Layer *a = d->layer(0), *b = d->layer(1), *c = d->layer(2);
+  CHECK(a->type == LayerType::ToonzRaster && b->type == LayerType::Vector &&
+        c->type == LayerType::Raster);
+  CHECK(a->visible && b->visible && !c->visible);
+  // timing: drawings held like in the desktop xsheet
+  CHECK(a->cell(0) == a->cell(1) && a->cell(1) != a->cell(2) &&
+        a->cell(2) != a->cell(3) && a->cell(3) == a->cell(4) && a->cell(0));
+  CHECK(b->cell(0) == b->cell(1) && b->cell(2) == b->cell(4) && b->cell(1) != b->cell(2));
+  Img r0 = render(e, 0), r2 = render(e, 2), r4 = render(e, 4);
+  // TLV line, drawing 1 at raster row 700 (y-up) -> canvas y 379
+  CHECK(isDark(r0.at(400, 379)) && isWhite(r0.at(400, 579)));
+  CHECK(isDark(r2.at(400, 579)) && isWhite(r2.at(400, 379)));
+  const uint8_t *red = r4.at(400, 779);
+  printf("  TLV drawing 3 pixel = (%d,%d,%d)\n", red[0], red[1], red[2]);
+  CHECK(red[0] > 180 && red[1] < 90 && red[2] < 90);
+  // PLI square: 300 stage units = 675 px, centred; left edge at x ~622
+  int edge = -1;
+  for (int x = 560; x < 700 && edge < 0; x++)
+    if (isDark(r0.at(x, 540))) edge = x;
+  printf("  PLI square left edge x=%d (expected ~622)\n", edge);
+  CHECK(edge >= 612 && edge <= 632);
+  CHECK(isWhite(r0.at(960, 300)));          // unfilled square, row 0
+  const uint8_t *fill = r2.at(960, 300);    // filled on drawing 2
+  printf("  PLI region fill = (%d,%d,%d)\n", fill[0], fill[1], fill[2]);
+  CHECK(fill[2] > 180 && fill[0] < 90);
+  savePng(r4, "16_tnz_import_row4.png");
+}
+
 int main(int argc, char **argv) {
   setvbuf(stdout, nullptr, _IONBF, 0);
   QCoreApplication app(argc, argv);
@@ -1037,6 +1085,7 @@ int main(int argc, char **argv) {
   testRig(e);
   testFx(e);
   testVector(e);
+  testTnzImport(e);
   testExport(e);
   testGifQuantizer();
   testMemoryAndPerf(e);
