@@ -722,4 +722,49 @@ public class AppFlowTest {
         log("two audio tracks shown in the timeline; mixdown OK");
         c.pause().stop().destroy();
     }
+
+    @Test
+    public void t13_importDesktopTnz() throws Exception {
+        // scene saved by the desktop OpenToonz libraries (android/tools/tnzcompat)
+        File src = new File(System.getProperty("user.dir"), "../engine/tests/data/desktop_scene");
+        File copy = new File(RuntimeEnvironment.application.getCacheDir(), "tnzimport");
+        ProjectStore.deleteRecursive(copy);
+        copyDir(src, copy);
+        List<File> scenes = new ArrayList<>();
+        ProjectsActivity.findTnz(copy, scenes);
+        assertEquals(1, scenes.size());
+        ProjectsActivity pa = Robolectric.buildActivity(ProjectsActivity.class).setup().get();
+        pa.importScene(scenes.get(0));
+        AlertDialog notes = ShadowAlertDialog.getLatestAlertDialog();
+        assertNotNull("import notes dialog", notes);
+        log("import notes: " + shadowOf(notes).getMessage());
+        notes.getButton(DialogInterface.BUTTON_POSITIVE).performClick();
+        Intent next = shadowOf(pa).getNextStartedActivity();
+        assertNotNull(next);
+        assertEquals(EditorActivity.class.getName(), next.getComponent().getClassName());
+        assertEquals(1920, NativeEngine.getWidth());
+        assertEquals(1080, NativeEngine.getHeight());
+        assertEquals(12, NativeEngine.getFps());
+        assertEquals(3, NativeEngine.getLayerCount());
+        assertEquals(5, NativeEngine.getFrameCount());
+        assertEquals(NativeEngine.LAYER_VECTOR, NativeEngine.getLayerType(1));
+        assertTrue(!NativeEngine.isLayerVisible(2));
+        assertEquals(NativeEngine.getCell(0, 0), NativeEngine.getCell(0, 1));
+        assertEquals(NativeEngine.getCell(0, 3), NativeEngine.getCell(0, 4));
+        int fill = frame(2, false).getPixel(960, 300);
+        log(String.format("imported PLI fill at row 2 = #%08X", fill));
+        assertTrue(Color.blue(fill) > 180 && Color.red(fill) < 90);
+        log("desktop .tnz imported into a mobile project and opened in the editor");
+    }
+
+    static void copyDir(File from, File to) throws java.io.IOException {
+        to.mkdirs();
+        File[] kids = from.listFiles();
+        if (kids == null) return;
+        for (File k : kids) {
+            File d = new File(to, k.getName());
+            if (k.isDirectory()) copyDir(k, d);
+            else java.nio.file.Files.copy(k.toPath(), d.toPath());
+        }
+    }
 }
