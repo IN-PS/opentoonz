@@ -203,6 +203,9 @@ set(TOONZLIB_SOURCES
 set(IMAGE_SOURCES
   ${OT_SRC}/image/tzl/tiio_tzl.cpp
   ${OT_SRC}/image/png/tiio_png.cpp
+  ${OT_SRC}/image/pli/tiio_pli.cpp
+  ${OT_SRC}/image/pli/pli_io.cpp
+  ${OT_SRC}/image/pli/tags.cpp
   ${OT_SRC}/image/compatibility/tfile_io.c
 )
 
@@ -226,6 +229,7 @@ target_include_directories(otm_opentoonz PUBLIC
   ${OT_SRC}/include/toonz
   ${OT_SRC}/image/tzl
   ${OT_SRC}/image/png
+  ${OT_SRC}/image/pli
   ${OT_COMMON}/tvectorimage
   ${OT_COMMON}/tvrender
   ${OT_COMMON}/trop
@@ -252,6 +256,7 @@ add_library(otm_core STATIC
   src/tools.cpp
   src/projectio.cpp
   src/gifencoder.cpp
+  src/vector.cpp
   src/engine.cpp)
 target_include_directories(otm_core PUBLIC src)
 target_link_libraries(otm_core PUBLIC otm_opentoonz)

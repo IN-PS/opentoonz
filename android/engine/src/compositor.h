@@ -3,6 +3,9 @@
 
 #include "document.h"
 
+#include <map>
+#include <string>
+
 namespace otm {
 
 class Selection;
@@ -43,6 +46,13 @@ private:
                     const TRaster32P &outClip, const TRect &clip,
                     const TAffine &layerAff);
   TRaster32P m_full;  // full-size buffer for transformed layers
+  //! layer with effects: rendered in full, effects applied, cached
+  TRaster32P fxLayer(const Document &doc, const Layer *layer, int row);
+  struct FxCache {
+    std::string key;
+    TRaster32P ras;
+  };
+  std::map<int, FxCache> m_fxCache;  // by layer uid
   TRaster32P tempFor(const TDimension &d);
   TRaster32P m_tmp;
 };

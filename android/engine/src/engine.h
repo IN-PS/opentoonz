@@ -7,6 +7,7 @@
 #include "compositor.h"
 #include "document.h"
 #include "tools.h"
+#include "vector.h"
 
 #include <memory>
 #include <mutex>
@@ -70,6 +71,7 @@ public:
   DirtyRect deleteSelection();
   //! selection bounds in canvas coords: {x0,y0,x1,y1}; empty if inactive
   DirtyRect selectionBounds() const;
+  bool hasSelection() const;
 
   // undo -----------------------------------------------------------------
   bool undo();
@@ -123,6 +125,20 @@ public:
   void setKeyLive(int layer, int row, const Xform &xf, Ease ease);
   void endKeyEdit();
   std::vector<int> keyRows(int layer) const;
+
+  // layer effects ---------------------------------------------------------
+  void setLayerFx(int layer, const LayerFx &fx);
+  LayerFx layerFx(int layer) const;
+
+  // peg hierarchy / cut-out rig -------------------------------------------
+  //! parent layer index, or -1 for none; false if it would create a cycle
+  bool setParent(int layer, int parent);
+  int parentOf(int layer) const;
+  void setPivot(int layer, double x, double y);  // canvas pixels
+  TPointD pivotOf(int layer) const;               // canvas pixels
+  //! A canvas drag vector expressed in the space where the layer's own
+  //! x/y key values live (its parent's frame, camera included).
+  TPointD canvasDeltaToLocal(int layer, int row, double dx, double dy) const;
   Ease keyEase(int layer, int row) const;
 
   // timing ---------------------------------------------------------------
@@ -132,7 +148,13 @@ public:
   //! Sets how many frames the drawing at the current row is exposed.
   void setExposure(int frames);
 
+  //! add a layer of a given type (0 Toonz Raster, 1 Raster, 2 Vector)
+  int addLayerOfType(int type);
+
 private:
+  bool isVectorLayer() const;
+  bool vselActive() const;
+  DirtyRect fullCanvas() const;
   int m_keyEditLayer = -2;
   KeyMap m_keyEditBefore;
   KeyMap *keysOf(int layer) const;
@@ -146,6 +168,8 @@ private:
   Compositor m_compositor;
   std::unique_ptr<StrokeSession> m_stroke;
   std::unique_ptr<Selection> m_selection;
+  std::unique_ptr<VectorSelection> m_vsel;
+  std::unique_ptr<VectorStroke> m_vstroke;
   TRaster32P m_frame;
   int m_picked = -1;
   std::string m_projectDir;

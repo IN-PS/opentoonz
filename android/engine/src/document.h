@@ -27,7 +27,7 @@
 
 namespace otm {
 
-enum class LayerType { ToonzRaster = 0, Raster = 1 };
+enum class LayerType { ToonzRaster = 0, Raster = 1, Vector = 2 };
 
 //! Animatable transform (OpenToonz "peg"-like). Canvas units: x/y pixels
 //! (y down), rotation degrees clockwise, uniform scale, opacity 0..1.
@@ -48,6 +48,20 @@ using KeyMap = std::map<int, Key>;  // row -> key
 //! Interpolated transform at a row (identity when there are no keys).
 Xform xformAt(const KeyMap &keys, int row);
 
+//! Per-layer effects (CPU, built on OpenToonz TRop operations).
+struct LayerFx {
+  int blur = 0;                     // radius px
+  int glow = 0, glowIntensity = 100;  // radius px, %
+  TPixel32 glowColor = TPixel32(255, 236, 150);
+  int shadowDx = 0, shadowDy = 0, shadowBlur = 0, shadowOpacity = 0;  // px, %
+  TPixel32 shadowColor = TPixel32(0, 0, 0);
+  int brightness = 0, contrast = 0, saturation = 0, hue = 0;  // -100..100, deg
+  bool active() const {
+    return blur || glow || shadowOpacity || brightness || contrast || saturation || hue;
+  }
+  std::string key() const;  // cache key / serialization
+};
+
 class Layer {
 public:
   int uid = 0;
@@ -59,6 +73,11 @@ public:
 
   std::vector<int> cells;           // row -> drawing number (0 = empty)
   KeyMap keys;                      // transform animation
+  // peg hierarchy (OpenToonz "parent" of a column/peg): the layer moves with
+  // its parent; rotation/scale happen around the pivot (canvas pixels).
+  int parentUid = 0;                // 0 = no parent
+  LayerFx fx;
+  double pivotX = -1, pivotY = -1;  // <0 = canvas centre
   std::map<int, std::string> drawings;  // drawing number -> TImageCache id
   int nextDrawing = 1;
 
@@ -146,13 +165,16 @@ public:
   OnionSettings onion;
   bool dirty         = false;
   std::string name   = "Untitled";
-  std::string savedDir;
+  std::string savedDir;  // directory of the last save/load (incremental save)
   KeyMap cameraKeys;  // camera animation: pan (x,y), rotation, zoom (scale)
+  int paletteSerial = 0;  // bumped on palette edits (render caches)
 
   //! Raster-space affine of a layer at a row, including the camera
   //! (layer -> output).  Identity when nothing is animated.
   TAffine layerAffine(const Layer *layer, int row) const;
-  double layerOpacity(const Layer *layer, int row) const;  // directory of the last save/load (incremental save)
+  double layerOpacity(const Layer *layer, int row) const;
+  TAffine layerWorldAffine(const Layer *layer, int row) const;  // no camera
+  bool wouldCycle(const Layer *layer, int parentUid) const;
 
   //! Marks the level content of a layer as modified (pixels or cells).
   void touch(Layer *layer) {

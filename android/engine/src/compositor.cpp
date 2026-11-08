@@ -1,5 +1,7 @@
 #include "compositor.h"
 #include "tools.h"
+#include "vector.h"
+#include "tvectorimage.h"
 
 #include "trop.h"
 #include "tropcm.h"
@@ -44,6 +46,11 @@ void Compositor::drawImage(const Document &doc, const TImageP &img,
                            int opacity, const TPixel32 *colorScale,
                            const TAffine &aff) {
   if (!img || opacity <= 0) return;
+  if (TVectorImageP vi = img) {  // resolution independent, at any transform
+    rasterizeVector(doc, vi, outClip, TTranslation(-clip.x0, -clip.y0) * aff, opacity,
+                    colorScale);
+    return;
+  }
   if (!aff.isIdentity()) {
     // animated layer / camera: whole drawing to RGBM, then resampled
     TRasterP src;
@@ -99,6 +106,114 @@ void Compositor::drawFloating(const Document &doc, const Selection &sel,
   else if (TRasterImageP ri = img)
     TRop::resample(tmp, ri->getRaster(), aff);
   TRop::over(outClip, tmp);
+}
+
+// ---------------------------------------------------------------- effects
+namespace {
+inline int clamp255(int v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
+
+void colorAdjust(const TRaster32P &r, const LayerFx &fx) {
+  double br = fx.brightness * 2.55, ct = (100.0 + fx.contrast) / 100.0;
+  double sat = (100.0 + fx.saturation) / 100.0, h = -fx.hue * M_PI / 180.0;  // +hue: red->green
+  // hue rotation matrix in YIQ-like space (luminance preserving)
+  double cs = cos(h), sn = sin(h);
+  double m[3][3] = {
+      {0.299 + 0.701 * cs + 0.168 * sn, 0.587 - 0.587 * cs + 0.330 * sn, 0.114 - 0.114 * cs - 0.497 * sn},
+      {0.299 - 0.299 * cs - 0.328 * sn, 0.587 + 0.413 * cs + 0.035 * sn, 0.114 - 0.114 * cs + 0.292 * sn},
+      {0.299 - 0.300 * cs + 1.250 * sn, 0.587 - 0.588 * cs - 1.050 * sn, 0.114 + 0.886 * cs - 0.203 * sn}};
+  for (int y = 0; y < r->getLy(); y++) {
+    TPixel32 *p = r->pixels(y), *e = p + r->getLx();
+    for (; p < e; ++p) {
+      if (!p->m) continue;
+      double a = p->m / 255.0;
+      double c[3] = {p->r / a, p->g / a, p->b / a};  // depremultiply
+      if (fx.hue) {
+        double n[3];
+        for (int i = 0; i < 3; i++) n[i] = m[i][0] * c[0] + m[i][1] * c[1] + m[i][2] * c[2];
+        c[0] = n[0], c[1] = n[1], c[2] = n[2];
+      }
+      double lum = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+      for (int i = 0; i < 3; i++) {
+        double v = lum + (c[i] - lum) * sat;
+        v        = (v - 127.5) * ct + 127.5 + br;
+        c[i]     = std::max(0.0, std::min(255.0, v));
+      }
+      p->r = (int)(c[0] * a + 0.5), p->g = (int)(c[1] * a + 0.5), p->b = (int)(c[2] * a + 0.5);
+    }
+  }
+}
+
+TRaster32P blurred(const TRaster32P &src, int radius) {
+  TRaster32P out(src->getSize());
+  out->clear();
+  TRop::blur(out, src, radius, 0, 0);  // OpenToonz box/gaussian blur
+  return out;
+}
+
+// silhouette of src (alpha) coloured, shifted by (dx,dy) raster px
+TRaster32P silhouette(const TRaster32P &src, TPixel32 col, int opacity, int dx, int dy) {
+  TRaster32P out(src->getSize());
+  out->clear();
+  for (int y = 0; y < src->getLy(); y++) {
+    int sy = y - dy;
+    if (sy < 0 || sy >= src->getLy()) continue;
+    TPixel32 *d = out->pixels(y);
+    const TPixel32 *s = src->pixels(sy);
+    for (int x = 0; x < src->getLx(); x++) {
+      int sx = x - dx;
+      if (sx < 0 || sx >= src->getLx()) continue;
+      int m = s[sx].m * opacity / 100;
+      d[x]  = TPixel32(col.r * m / 255, col.g * m / 255, col.b * m / 255, m);
+    }
+  }
+  return out;
+}
+}  // namespace
+
+TRaster32P Compositor::fxLayer(const Document &doc, const Layer *layer, int row) {
+  TImageP img = doc.image(layer, row);
+  TAffine aff = doc.layerAffine(layer, row);
+  int op      = (int)std::lround(doc.layerOpacity(layer, row) * 255);
+  char k[512];
+  snprintf(k, sizeof(k), "%d|%d|%d|%d|%d|%.6f %.6f %.6f %.6f %.6f %.6f|%s", row,
+           layer->cell(row), layer->revision, op, doc.paletteSerial, aff.a11, aff.a12,
+           aff.a13, aff.a21, aff.a22, aff.a23, layer->fx.key().c_str());
+  FxCache &c = m_fxCache[layer->uid];
+  if (c.ras && c.key == k) return c.ras;
+  TRaster32P buf(doc.size());
+  buf->clear();
+  if (img) {
+    TRect all = buf->getBounds();
+    drawImage(doc, img, buf, all, op, nullptr, aff);
+  }
+  const LayerFx &fx = layer->fx;
+  if (fx.brightness || fx.contrast || fx.saturation || fx.hue) colorAdjust(buf, fx);
+  if (fx.blur > 0) buf = blurred(buf, fx.blur);
+  if (fx.shadowOpacity > 0) {
+    TRaster32P sh = silhouette(buf, fx.shadowColor, fx.shadowOpacity, fx.shadowDx, -fx.shadowDy);
+    if (fx.shadowBlur > 0) sh = blurred(sh, fx.shadowBlur);
+    TRop::over(sh, buf);  // layer over its shadow
+    buf = sh;
+  }
+  if (fx.glow > 0) {
+    TRaster32P g = blurred(silhouette(buf, fx.glowColor, 100, 0, 0), fx.glow);
+    for (int y = 0; y < buf->getLy(); y++) {  // additive glow
+      TPixel32 *d = buf->pixels(y);
+      const TPixel32 *s = g->pixels(y);
+      for (int x = 0; x < buf->getLx(); x++) {
+        int k2 = fx.glowIntensity;
+        d[x].r = clamp255(d[x].r + s[x].r * k2 / 100);
+        d[x].g = clamp255(d[x].g + s[x].g * k2 / 100);
+        d[x].b = clamp255(d[x].b + s[x].b * k2 / 100);
+        d[x].m = std::max<int>(d[x].m, clamp255(s[x].m * k2 / 100));
+        d[x].r = std::min(d[x].r, d[x].m), d[x].g = std::min(d[x].g, d[x].m),
+        d[x].b = std::min(d[x].b, d[x].m);
+      }
+    }
+  }
+  c.key = k;
+  c.ras = buf;
+  return buf;
 }
 
 std::vector<std::pair<int, int>> Compositor::onionRows(const Document &doc,
@@ -165,7 +280,11 @@ void Compositor::render(const Document &doc, int row, const TRaster32P &out,
     }
     TAffine aff = doc.layerAffine(layer, row);
     int op      = (int)std::lround(doc.layerOpacity(layer, row) * 255);
-    drawImage(doc, doc.image(layer, row), outClip, clip, op, nullptr, aff);
+    if (layer->fx.active()) {
+      TRaster32P fxr = fxLayer(doc, layer, row);
+      TRop::over(outClip, sub(fxr, clip));
+    } else
+      drawImage(doc, doc.image(layer, row), outClip, clip, op, nullptr, aff);
     if (opt.selection && opt.selection->active() &&
         opt.selection->layerUid() == layer->uid)
       drawFloating(doc, *opt.selection, outClip, clip, aff);

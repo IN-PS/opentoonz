@@ -10,6 +10,7 @@
 #include "tstream.h"
 #include "tsystem.h"
 #include "ttoonzimage.h"
+#include "tvectorimage.h"
 
 #include <QDir>
 #include <QFile>
@@ -20,7 +21,7 @@
 
 namespace otm {
 
-static const int kFormatVersion = 2;  // 2: transform keyframes
+static const int kFormatVersion = 3;  // 2: keyframes, 3: rig/fx/vector
 
 static void writeKeys(TOStream &os, const KeyMap &keys) {
   for (auto &k : keys)
@@ -93,6 +94,7 @@ static bool reuseLevel(const QString &dir, const QString &tmp, const Layer &l,
   QStringList files =
       l.type == LayerType::ToonzRaster
           ? QStringList{b + ".tlv"}  // .tpl is rewritten (palette may change)
+      : l.type == LayerType::Vector ? QStringList{b + ".pli"}
           : levels.entryList(QStringList{b + ".*.png"}, QDir::Files);
   if (files.isEmpty()) return false;
   for (const QString &f : files)
@@ -136,7 +138,18 @@ bool saveProject(Document &doc, const std::string &dirStr, std::string *error) {
                                       ".tpl").toStdString());
         continue;
       }
-      if (l->type == LayerType::ToonzRaster) {
+      if (l->type == LayerType::Vector) {
+        // OpenToonz PLI vector level (palette embedded)
+        TFilePath fp = tmpFp + TFilePath("levels/" + base + ".pli");
+        if (!used.empty()) {
+          TLevelWriterP lw(fp);
+          lw->setPalette(doc.palette());
+          for (int d : used) {
+            TImageWriterP iw = lw->getFrameWriter(TFrameId(d));
+            iw->save(doc.drawing(l, d, false));
+          }
+        }
+      } else if (l->type == LayerType::ToonzRaster) {
         TFilePath fp = tmpFp + TFilePath("levels/" + base + ".tlv");
         if (!used.empty()) {
           TLevelWriterP lw(fp);
@@ -189,7 +202,9 @@ bool saveProject(Document &doc, const std::string &dirStr, std::string *error) {
         Layer *l = doc.layer(i);
         std::map<std::string, std::string> la;
         la["uid"]  = std::to_string(l->uid);
-        la["type"] = l->type == LayerType::ToonzRaster ? "tlv" : "png";
+        la["type"] = l->type == LayerType::ToonzRaster ? "tlv"
+                     : l->type == LayerType::Vector    ? "pli"
+                                                       : "png";
         os.openChild("layer", la);
         os.child("name") << l->name;
         os.child("level") << levelBaseName(*l);
@@ -199,6 +214,14 @@ bool saveProject(Document &doc, const std::string &dirStr, std::string *error) {
         os.openChild("cells");
         for (int c : l->cells) os << c;
         os.closeChild();
+        if (l->fx.active()) {
+          os.child("fx") << l->fx.key();
+        }
+        if (l->parentUid || l->pivotX >= 0) {
+          os.openChild("rig");
+          os << l->parentUid << l->pivotX << l->pivotY;
+          os.closeChild();
+        }
         if (!l->keys.empty()) {
           os.openChild("keys");
           writeKeys(os, l->keys);
@@ -256,6 +279,9 @@ std::unique_ptr<Document> loadProject(const std::string &dirStr,
     int visible = 1, locked = 0, opacity = 255, next = 1;
     std::vector<int> cells;
     KeyMap keys;
+    int parentUid = 0;
+    double pivotX = -1, pivotY = -1;
+    std::string fx;
   };
   KeyMap cameraKeys;
   std::vector<LayerRec> recs;
@@ -299,6 +325,10 @@ std::unique_ptr<Document> loadProject(const std::string &dirStr,
               is >> r.level;
             else if (tag == "keys")
               readKeys(is, r.keys);
+            else if (tag == "fx")
+              is >> r.fx;
+            else if (tag == "rig")
+              is >> r.parentUid >> r.pivotX >> r.pivotY;
             else if (tag == "flags")
               is >> r.visible >> r.locked >> r.opacity >> r.next;
             else if (tag == "cells")
@@ -333,7 +363,9 @@ std::unique_ptr<Document> loadProject(const std::string &dirStr,
     doc->setPalette(plt);
 
   for (const LayerRec &r : recs) {
-    LayerType type = r.type == "png" ? LayerType::Raster : LayerType::ToonzRaster;
+    LayerType type = r.type == "png"   ? LayerType::Raster
+                     : r.type == "pli" ? LayerType::Vector
+                                       : LayerType::ToonzRaster;
     Layer *l       = doc->addLayer(type, r.name);
     l->uid         = r.uid;
     doc->setLastUid(r.uid);
@@ -342,10 +374,38 @@ std::unique_ptr<Document> loadProject(const std::string &dirStr,
     l->opacity = r.opacity;
     l->cells   = r.cells;
     l->keys    = r.keys;
+    l->parentUid = r.parentUid;
+    if (!r.fx.empty()) {
+      LayerFx &f = l->fx;
+      int gr, gg, gb, sr, sg, sb;
+      if (sscanf(r.fx.c_str(), "%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d", &f.blur,
+                 &f.glow, &f.glowIntensity, &gr, &gg, &gb, &f.shadowDx, &f.shadowDy,
+                 &f.shadowBlur, &f.shadowOpacity, &sr, &sg, &sb, &f.brightness,
+                 &f.contrast, &f.saturation, &f.hue) == 17) {
+        f.glowColor   = TPixel32(gr, gg, gb);
+        f.shadowColor = TPixel32(sr, sg, sb);
+      } else
+        f = LayerFx();
+    }
+    l->pivotX    = r.pivotX;
+    l->pivotY    = r.pivotY;
     std::set<int> used(r.cells.begin(), r.cells.end());
     used.erase(0);
     try {
-      if (type == LayerType::ToonzRaster) {
+      if (type == LayerType::Vector) {
+        TFilePath fp = dirFp + TFilePath("levels/" + r.level + ".pli");
+        if (!used.empty()) {
+          TLevelReaderP lr(fp);
+          TLevelP lv = lr->loadInfo();
+          for (auto it = lv->begin(); it != lv->end(); ++it) {
+            TImageP img = lr->getFrameReader(it->first)->load();
+            if (TVectorImageP vi = img) {
+              vi->setPalette(doc->palette());
+              doc->setDrawing(l, it->first.getNumber(), img);
+            }
+          }
+        }
+      } else if (type == LayerType::ToonzRaster) {
         TFilePath fp = dirFp + TFilePath("levels/" + r.level + ".tlv");
         if (!used.empty()) {
           TLevelReaderP lr(fp);

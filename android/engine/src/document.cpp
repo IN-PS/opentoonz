@@ -3,6 +3,7 @@
 #include "timagecache.h"
 #include "trasterimage.h"
 #include "ttoonzimage.h"
+#include "tvectorimage.h"
 #include "tcolorstyles.h"
 
 #include <algorithm>
@@ -29,6 +30,15 @@ int Layer::usedRows() const { return (int)cells.size(); }
 
 //-----------------------------------------------------------------------------
 
+std::string LayerFx::key() const {
+  char b[256];
+  snprintf(b, sizeof(b), "%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d", blur, glow,
+           glowIntensity, glowColor.r, glowColor.g, glowColor.b, shadowDx, shadowDy,
+           shadowBlur, shadowOpacity, shadowColor.r, shadowColor.g, shadowColor.b,
+           brightness, contrast, saturation, hue);
+  return b;
+}
+
 Xform xformAt(const KeyMap &keys, int row) {
   if (keys.empty()) return Xform();
   auto hi = keys.lower_bound(row);
@@ -53,15 +63,38 @@ Xform xformAt(const KeyMap &keys, int row) {
 }
 
 // Canvas convention -> OpenToonz raster space (y up): pivot = canvas centre.
-static TAffine xformAffine(const Xform &f, const TDimension &sz) {
-  TPointD c(sz.lx * 0.5, sz.ly * 0.5);
+// Canvas convention -> OpenToonz raster space (y up), around a pivot given
+// in canvas pixels (<0 = canvas centre).
+static TAffine xformAffine(const Xform &f, const TDimension &sz, double px = -1,
+                           double py = -1) {
+  TPointD c(px < 0 ? sz.lx * 0.5 : px, py < 0 ? sz.ly * 0.5 : sz.ly - py);
   return TTranslation(c + TPointD(f.x, -f.y)) * TRotation(-f.rot) *
          TScale(f.scale) * TTranslation(-c);
 }
 
-TAffine Document::layerAffine(const Layer *layer, int row) const {
+// Local transform of a layer composed with all its ancestors (pegs).
+TAffine Document::layerWorldAffine(const Layer *layer, int row) const {
   TAffine a;
-  if (layer && !layer->keys.empty()) a = xformAffine(xformAt(layer->keys, row), size());
+  const Layer *l = layer;
+  for (int depth = 0; l && depth < 32; depth++) {
+    if (!l->keys.empty())
+      a = xformAffine(xformAt(l->keys, row), size(), l->pivotX, l->pivotY) * a;
+    l = l->parentUid ? layerByUid(l->parentUid) : nullptr;
+  }
+  return a;
+}
+
+bool Document::wouldCycle(const Layer *layer, int parentUid) const {
+  for (int depth = 0; parentUid && depth < 64; depth++) {
+    if (parentUid == layer->uid) return true;
+    const Layer *p = layerByUid(parentUid);
+    parentUid      = p ? p->parentUid : 0;
+  }
+  return false;
+}
+
+TAffine Document::layerAffine(const Layer *layer, int row) const {
+  TAffine a = layerWorldAffine(layer, row);
   if (!cameraKeys.empty()) {
     // the camera frames the scene: the view is the inverse of its placement
     Xform cam = xformAt(cameraKeys, row);
@@ -136,7 +169,8 @@ Layer *Document::addLayer(LayerType type, const std::string &name, int index) {
   auto l  = std::make_shared<Layer>();
   l->uid  = allocUid();
   l->type = type;
-  l->name = name.empty() ? (type == LayerType::Raster ? "Image" : "Layer") +
+  l->name = name.empty() ? (type == LayerType::Raster ? "Image"
+                             : type == LayerType::Vector ? "Vector" : "Layer") +
                                std::string(" ") + std::to_string(l->uid)
                          : name;
   attachLayer(l, index);
@@ -180,6 +214,11 @@ TImageP Document::newImage(LayerType type) const {
     ti->setPalette(m_palette.getPointer());
     return ti;
   }
+  if (type == LayerType::Vector) {
+    TVectorImageP vi = new TVectorImage();
+    vi->setPalette(m_palette.getPointer());
+    return vi;
+  }
   TRaster32P ras(m_w, m_h);
   ras->clear();
   TRasterImageP ri(ras);
@@ -194,6 +233,7 @@ TImageP Document::drawing(const Layer *layer, int drawingNo,
   if (it == layer->drawings.end()) return TImageP();
   TImageP img = TImageCache::instance()->get(it->second, toBeModified);
   if (TToonzImageP ti = img) ti->setPalette(m_palette.getPointer());
+  if (TVectorImageP vi = img) vi->setPalette(m_palette.getPointer());
   return img;
 }
 

@@ -2,6 +2,8 @@
 
 #include "gifencoder.h"
 #include "projectio.h"
+#include "vector.h"
+#include "tiio_pli.h"
 
 #include "tfiletype.h"
 #include "timage_io.h"
@@ -81,6 +83,7 @@ public:
       : m_doc(d), m_id(id), m_before(b), m_after(a) {}
   void set(TPixel32 c) const {
     if (TColorStyle *s = m_doc->palette()->getStyle(m_id)) s->setMainColor(c);
+    m_doc->paletteSerial++;
     m_doc->dirty = true;
   }
   void undo() const override { set(m_before); }
@@ -103,6 +106,9 @@ void Engine::initOpenToonz() {
   std::call_once(once, [] {
     // Same registrations as toonz/sources/image/tiio.cpp (initImageIo) for
     // the formats the mobile engine uses.
+    TLevelWriter::define("pli", TLevelWriterPli::create, false);
+    TLevelReader::define("pli", TLevelReaderPli::create);
+    TFileType::declare("pli", TFileType::VECTOR_LEVEL);
     TLevelWriter::define("tlv", TLevelWriterTzl::create, false);
     TLevelReader::define("tlv", TLevelReaderTzl::create);
     TFileType::declare("tlv", TFileType::CMAPPED_LEVEL);
@@ -134,13 +140,14 @@ void Engine::newDocument(int w, int h, int fps) {
   m_doc->setMinFrameCount(1);
   m_doc->dirty = false;
   m_selection.reset(new Selection(m_doc.get()));
+  m_vsel.reset(new VectorSelection(m_doc.get()));
   m_frame = TRaster32P(m_doc->width(), m_doc->height());
   m_projectDir.clear();
 }
 
 bool Engine::save(const std::string &dir, std::string *error) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
-  if (m_selection->active()) commitSelection();
+  if (hasSelection()) commitSelection();
   bool ok = saveProject(*m_doc, dir, error);
   if (ok) {
     m_doc->dirty = false;
@@ -157,6 +164,7 @@ bool Engine::load(const std::string &dir, std::string *error) {
   m_stroke.reset();
   m_doc = std::move(d);
   m_selection.reset(new Selection(m_doc.get()));
+  m_vsel.reset(new VectorSelection(m_doc.get()));
   m_frame      = TRaster32P(m_doc->width(), m_doc->height());
   m_projectDir = dir;
   m_doc->dirty = false;
@@ -243,10 +251,29 @@ void Engine::renderScaledRGBA(int row, uint8_t *dst, int w, int h, int stride,
 Engine::DirtyRect Engine::pointerDown(double x, double y, double pressure) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
   TPointD p = toLayer(x, y);
+  if (isVectorLayer() && tool != Tool::Select && tool != Tool::Shape &&
+      tool != Tool::Transform) {
+    if (vselActive()) commitSelection();
+    if (tool == Tool::Brush || tool == Tool::Eraser) {
+      m_vstroke.reset(new VectorStroke(m_doc.get(), settings, tool));
+      if (!m_vstroke->begin(p, pressure)) {
+        m_vstroke.reset();
+        return DirtyRect();
+      }
+      return fullCanvas();
+    }
+    if (tool == Tool::Fill)
+      return vectorFill(m_doc.get(), p, settings.fillEmptyOnly) ? fullCanvas() : DirtyRect();
+    if (tool == Tool::Picker) {
+      m_picked = vectorPick(m_doc.get(), p);
+      if (m_picked > 0) m_doc->currentStyle = m_picked;
+    }
+    return DirtyRect();
+  }
   switch (tool) {
   case Tool::Brush:
   case Tool::Eraser: {
-    if (m_selection->active()) commitSelection();
+    if (hasSelection()) commitSelection();
     m_stroke.reset(new StrokeSession(m_doc.get(), settings, tool));
     TRect r = m_stroke->begin(p, pressure);
     if (!m_stroke->valid()) {
@@ -256,7 +283,7 @@ Engine::DirtyRect Engine::pointerDown(double x, double y, double pressure) {
     return layerToCanvas(r);
   }
   case Tool::Fill: {
-    if (m_selection->active()) commitSelection();
+    if (hasSelection()) commitSelection();
     return layerToCanvas(fillAt(m_doc.get(), settings, p));
   }
   case Tool::Picker: {
@@ -274,12 +301,21 @@ Engine::DirtyRect Engine::pointerDown(double x, double y, double pressure) {
 
 Engine::DirtyRect Engine::pointerMove(double x, double y, double pressure) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  if (m_vstroke) {
+    m_vstroke->move(toLayer(x, y), pressure);
+    return fullCanvas();
+  }
   if (!m_stroke) return DirtyRect();
   return layerToCanvas(m_stroke->move(toLayer(x, y), pressure));
 }
 
 Engine::DirtyRect Engine::pointerUp(double x, double y, double pressure) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  if (m_vstroke) {
+    m_vstroke->end(toLayer(x, y), pressure);
+    m_vstroke.reset();
+    return fullCanvas();
+  }
   if (!m_stroke) return DirtyRect();
   TRect r = m_stroke->end(toLayer(x, y), pressure);
   m_stroke.reset();
@@ -290,7 +326,7 @@ bool Engine::selectRect(int x0, int y0, int x1, int y1) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
   if (x1 < x0) std::swap(x0, x1);
   if (y1 < y0) std::swap(y0, y1);
-  if (!curAff().isIdentity())
+  if (!curAff().isIdentity() || isVectorLayer())
     return selectPolygon({{(double)x0, (double)y0}, {(double)x1 + 1, (double)y0},
                           {(double)x1 + 1, (double)y1 + 1}, {(double)x0, (double)y1 + 1}});
   int h = m_doc->height();
@@ -301,15 +337,19 @@ bool Engine::selectPolygon(const std::vector<std::pair<double, double>> &pts) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
   std::vector<TPointD> poly;
   for (auto &p : pts) poly.push_back(toLayer(p.first, p.second));
+  if (isVectorLayer()) return m_vsel->select(poly);
   return m_selection->liftPolygon(poly);
 }
 
 Engine::DirtyRect Engine::drawShape(int type, double x0, double y0, double x1,
                                     double y1) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
-  if (m_selection->active()) commitSelection();
+  if (hasSelection()) commitSelection();
   auto pts = shapePoints((ShapeType)type, toLayer(x0, y0), toLayer(x1, y1));
   if (pts.size() < 2) return DirtyRect();
+  if (isVectorLayer())
+    return vectorAddShape(m_doc.get(), settings, pts, type != (int)ShapeType::Line)
+               ? fullCanvas() : DirtyRect();
   ToolSettings s = settings;
   s.stabilizer   = 0;
   s.pressure     = false;
@@ -346,27 +386,52 @@ void Engine::transformSelection(double dx, double dy, double scale,
   // the drag vector is expressed in the (possibly animated) layer space
   TAffine inv = curAff().inv();
   TPointD d   = inv * TPointD(dx, -dy) - inv * TPointD(0, 0);
+  if (m_vsel->active()) {
+    m_vsel->setTransform(d.x, d.y, scale, -angle);
+    return;
+  }
   m_selection->setTransform(d.x, d.y, scale, -angle);
 }
 
 Engine::DirtyRect Engine::commitSelection() {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  if (m_vsel->active()) return m_vsel->commit(), fullCanvas();
   return layerToCanvas(m_selection->commit());
 }
 Engine::DirtyRect Engine::cancelSelection() {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  if (m_vsel->active()) return m_vsel->cancel(), fullCanvas();
   return layerToCanvas(m_selection->cancel());
 }
 Engine::DirtyRect Engine::deleteSelection() {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  if (m_vsel->active()) return m_vsel->erase(), fullCanvas();
   return layerToCanvas(m_selection->erase());
 }
 
 Engine::DirtyRect Engine::selectionBounds() const {
+  if (m_vsel->active()) {
+    TRectD b = m_vsel->bounds();
+    return layerToCanvas(TRect(tfloor(b.x0), tfloor(b.y0), tceil(b.x1), tceil(b.y1)));
+  }
   if (!m_selection->active()) return DirtyRect();
   TRectD b = m_selection->bounds();
   return layerToCanvas(TRect(tfloor(b.x0), tfloor(b.y0), tceil(b.x1) - 1,
                              tceil(b.y1) - 1));
+}
+
+bool Engine::hasSelection() const { return m_selection->active() || m_vsel->active(); }
+bool Engine::vselActive() const { return m_vsel && m_vsel->active(); }
+
+bool Engine::isVectorLayer() const {
+  Layer *l = m_doc->layer(m_doc->currentLayer);
+  return l && l->type == LayerType::Vector;
+}
+
+Engine::DirtyRect Engine::fullCanvas() const {
+  DirtyRect d;
+  d.x1 = m_doc->width() - 1, d.y1 = m_doc->height() - 1;
+  return d;
 }
 
 //-----------------------------------------------------------------------------
@@ -374,8 +439,8 @@ Engine::DirtyRect Engine::selectionBounds() const {
 bool Engine::undo() {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
   if (m_stroke) return false;
-  if (m_selection->active()) {
-    m_selection->cancel();
+  if (hasSelection()) {
+    cancelSelection();
     return true;
   }
   bool ok = TUndoManager::manager()->undo();
@@ -386,7 +451,7 @@ bool Engine::undo() {
 
 bool Engine::redo() {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
-  if (m_stroke || m_selection->active()) return false;
+  if (m_stroke || m_vstroke || hasSelection()) return false;
   bool ok = TUndoManager::manager()->redo();
   m_doc->currentLayer =
       std::max(0, std::min(m_doc->currentLayer, m_doc->layerCount() - 1));
@@ -397,7 +462,7 @@ bool Engine::redo() {
 
 void Engine::setCurrentRow(int row) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
-  if (m_selection->active()) commitSelection();
+  if (hasSelection()) commitSelection();
   m_doc->currentRow = std::max(0, row);
   // keep RAM low: drawings far from the current frame are LZ4-compressed
   // inside OpenToonz's TImageCache.
@@ -408,7 +473,7 @@ void Engine::setCurrentRow(int row) {
 
 void Engine::setCurrentLayer(int index) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
-  if (m_selection->active()) commitSelection();
+  if (hasSelection()) commitSelection();
   if (index >= 0 && index < m_doc->layerCount()) m_doc->currentLayer = index;
 }
 
@@ -501,11 +566,13 @@ void Engine::moveCell(int from, int to) {
 
 //-----------------------------------------------------------------------------
 
-int Engine::addLayer(bool raster) {
+int Engine::addLayer(bool raster) { return addLayerOfType(raster ? 1 : 0); }
+
+int Engine::addLayerOfType(int type) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  bool raster = type == 1;
   int index = m_doc->currentLayer + 1;
-  Layer *l  = m_doc->addLayer(raster ? LayerType::Raster : LayerType::ToonzRaster,
-                              "", index);
+  Layer *l  = m_doc->addLayer((LayerType)std::max(0, std::min(2, type)), "", index);
   index     = m_doc->indexOfUid(l->uid);
   TUndoManager::manager()->beginBlock();
   TUndoManager::manager()->add(
@@ -524,7 +591,7 @@ int Engine::addLayer(bool raster) {
 void Engine::deleteLayer(int index) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);
   if (m_doc->layerCount() <= 1) return;
-  if (m_selection->active()) cancelSelection();
+  if (hasSelection()) cancelSelection();
   auto l = m_doc->detachLayer(index);
   if (!l) return;
   TUndoManager::manager()->add(new LayerUndo(m_doc.get(), l, index, false));
@@ -597,6 +664,7 @@ void Engine::setStyleColor(int id, TPixel32 color) {
   if (!s || id == 0) return;
   TPixel32 before = s->getMainColor();
   s->setMainColor(color);
+  m_doc->paletteSerial++;
   TUndoManager::manager()->add(
       new StyleColorUndo(m_doc.get(), id, before, color));
   m_doc->dirty = true;
@@ -869,6 +937,114 @@ void Engine::setExposure(int frames) {
   l->cells.insert(l->cells.begin() + start, frames, d);
   pushCellsUndo(m_doc.get(), l, before, "Exposure");
   m_doc->currentRow = start;
+}
+
+//-----------------------------------------------------------------------------
+// peg hierarchy
+
+namespace {
+class RigUndo final : public TUndo {
+  Document *m_doc;
+  int m_uid, m_p0, m_p1;
+  double m_x0, m_y0, m_x1, m_y1;
+
+public:
+  RigUndo(Document *d, const Layer *l, int p0, double x0, double y0)
+      : m_doc(d), m_uid(l->uid), m_p0(p0), m_p1(l->parentUid), m_x0(x0), m_y0(y0),
+        m_x1(l->pivotX), m_y1(l->pivotY) {}
+  void set(int p, double x, double y) const {
+    if (Layer *l = m_doc->layerByUid(m_uid)) l->parentUid = p, l->pivotX = x, l->pivotY = y;
+    m_doc->dirty = true;
+  }
+  void undo() const override { set(m_p0, m_x0, m_y0); }
+  void redo() const override { set(m_p1, m_x1, m_y1); }
+  int getSize() const override { return sizeof(*this); }
+};
+}  // namespace
+
+bool Engine::setParent(int layer, int parent) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  Layer *l = m_doc->layer(layer);
+  if (!l) return false;
+  int puid = 0;
+  if (parent >= 0) {
+    Layer *p = m_doc->layer(parent);
+    if (!p || p == l || m_doc->wouldCycle(l, p->uid)) return false;
+    puid = p->uid;
+  }
+  int p0 = l->parentUid;
+  l->parentUid = puid;
+  TUndoManager::manager()->add(new RigUndo(m_doc.get(), l, p0, l->pivotX, l->pivotY));
+  m_doc->dirty = true;
+  return true;
+}
+
+int Engine::parentOf(int layer) const {
+  Layer *l = m_doc->layer(layer);
+  return l && l->parentUid ? m_doc->indexOfUid(l->parentUid) : -1;
+}
+
+void Engine::setPivot(int layer, double x, double y) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  Layer *l = m_doc->layer(layer);
+  if (!l) return;
+  double x0 = l->pivotX, y0 = l->pivotY;
+  l->pivotX = x, l->pivotY = y;
+  TUndoManager::manager()->add(new RigUndo(m_doc.get(), l, l->parentUid, x0, y0));
+  m_doc->dirty = true;
+}
+
+TPointD Engine::pivotOf(int layer) const {
+  Layer *l = m_doc->layer(layer);
+  if (!l || l->pivotX < 0) return TPointD(m_doc->width() * 0.5, m_doc->height() * 0.5);
+  return TPointD(l->pivotX, l->pivotY);
+}
+
+TPointD Engine::canvasDeltaToLocal(int layer, int row, double dx, double dy) const {
+  // frame in which the layer's own key x/y are applied = camera * parent chain
+  Layer *l      = m_doc->layer(layer);
+  Layer *parent = l && l->parentUid ? m_doc->layerByUid(l->parentUid) : nullptr;
+  TAffine frame = m_doc->layerAffine(parent, row);  // parent==null: camera only
+  TAffine inv   = frame.inv();
+  TPointD d     = inv * TPointD(dx, -dy) - inv * TPointD(0, 0);  // canvas y down
+  return TPointD(d.x, -d.y);
+}
+
+//-----------------------------------------------------------------------------
+// layer effects
+
+namespace {
+class FxUndo final : public TUndo {
+  Document *m_doc;
+  int m_uid;
+  LayerFx m_b, m_a;
+
+public:
+  FxUndo(Document *d, int uid, const LayerFx &b, const LayerFx &a)
+      : m_doc(d), m_uid(uid), m_b(b), m_a(a) {}
+  void set(const LayerFx &f) const {
+    if (Layer *l = m_doc->layerByUid(m_uid)) l->fx = f;
+    m_doc->dirty = true;
+  }
+  void undo() const override { set(m_b); }
+  void redo() const override { set(m_a); }
+  int getSize() const override { return sizeof(*this); }
+};
+}  // namespace
+
+void Engine::setLayerFx(int layer, const LayerFx &fx) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  Layer *l = m_doc->layer(layer);
+  if (!l) return;
+  LayerFx b = l->fx;
+  l->fx     = fx;
+  TUndoManager::manager()->add(new FxUndo(m_doc.get(), l->uid, b, fx));
+  m_doc->dirty = true;
+}
+
+LayerFx Engine::layerFx(int layer) const {
+  Layer *l = m_doc->layer(layer);
+  return l ? l->fx : LayerFx();
 }
 
 }  // namespace otm

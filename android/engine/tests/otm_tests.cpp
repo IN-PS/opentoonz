@@ -13,6 +13,7 @@
 #include "tpixelcm.h"
 #include "tsystem.h"
 #include "tundo.h"
+#include "tvectorimage.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -720,6 +721,170 @@ static void testKeyframes(Engine &e) {
   e.settings = ToolSettings();
 }
 
+
+// ------------------------------------------------------------- v0.3 features
+static void testRig(Engine &e) {
+  section("peg hierarchy + pivot (cut-out rig, forward kinematics)");
+  e.newDocument(400, 300, 12);
+  e.tool = Tool::Brush;
+  e.settings.brushMax = 8;
+  e.settings.pressure = false;
+  // "arm" (layer 0): horizontal from the shoulder (100,150) to the elbow (200,150)
+  stroke(e, line(100, 150, 200, 150));
+  // "forearm" (layer 1): from the elbow (200,150) to the hand (280,150)
+  e.addLayer();
+  stroke(e, line(200, 150, 280, 150));
+  CHECK(e.setParent(1, 0));
+  CHECK(!e.setParent(0, 1));               // cycles are refused
+  e.setPivot(0, 100, 150);                 // shoulder
+  e.setPivot(1, 200, 150);                 // elbow
+  // rotate the arm 90 deg clockwise at the shoulder: the forearm follows
+  Xform r;
+  r.rot = 90;
+  e.setKey(0, 0, r, Ease::Linear);
+  Img a = render(e, 0);
+  CHECK(isDark(a.at(100, 200)));           // arm now points down
+  CHECK(isDark(a.at(100, 280)));           // forearm followed (hand at y~330 clipped)
+  CHECK(isWhite(a.at(240, 150)));
+  // bend the elbow 90 deg counter-clockwise relative to the arm
+  Xform el;
+  el.rot = -90;
+  e.setKey(1, 0, el, Ease::Linear);
+  Img b = render(e, 0);
+  CHECK(isDark(b.at(140, 250)));           // forearm now horizontal at the elbow (100,250)
+  CHECK(isWhite(b.at(100, 290)));
+  savePng(b, "11_rig.png");
+  // child drag delta is converted into the parent's (rotated) frame
+  TPointD d = e.canvasDeltaToLocal(1, 0, 10, 0);
+  printf("  canvas drag (10,0) in the forearm's parent frame = (%.2f, %.2f)\n", d.x, d.y);
+  CHECK(std::abs(d.x) < 1e-6 && std::abs(std::abs(d.y) - 10) < 1e-6);
+  std::string err, dir = g_out + "/rigproj";
+  CHECK(e.save(dir, &err));
+  e.newDocument(10, 10, 12);
+  CHECK(e.load(dir, &err));
+  CHECK(e.parentOf(1) == 0 && std::abs(e.pivotOf(1).x - 200) < 1e-9);
+  CHECK(sameImg(b, render(e, 0)));
+  e.undo();
+}
+
+static void testFx(Engine &e) {
+  section("layer effects: blur, shadow, glow, colour adjust");
+  e.newDocument(300, 200, 12);
+  e.tool = Tool::Brush;
+  e.settings.brushMax = 10;
+  e.settings.pressure = false;
+  stroke(e, line(50, 100, 250, 100));
+  LayerFx fx;
+  fx.blur = 6;
+  e.setLayerFx(0, fx);
+  Img bl = render(e, 0);
+  // line edge at y=105; triangular blur radius 6 spreads ink up to y~111
+  printf("  blur: 2px outside the edge=%d (sharp: 255)\n", bl.at(150, 107)[0]);
+  CHECK(bl.at(150, 107)[0] < 240 && bl.at(150, 112)[0] > 245);
+  fx = LayerFx();
+  fx.shadowOpacity = 80, fx.shadowDx = 0, fx.shadowDy = 20, fx.shadowBlur = 0;
+  e.setLayerFx(0, fx);
+  Img sh = render(e, 0);
+  CHECK(isDark(sh.at(150, 100)));
+  CHECK(!isWhite(sh.at(150, 120)) && sh.at(150, 120)[0] < 90);   // shadow 20 px below
+  fx = LayerFx();
+  fx.glow = 8, fx.glowColor = TPixel32(255, 200, 0);
+  e.setLayerFx(0, fx);
+  Img gl = render(e, 0);
+  const uint8_t *g = gl.at(150, 108);
+  printf("  glow 3px outside the line = (%d,%d,%d)\n", g[0], g[1], g[2]);
+  CHECK(g[0] > g[2] + 30);                  // yellow halo
+  // colour adjust on a red line: hue +120 -> greenish
+  e.doc()->currentStyle = 3;
+  stroke(e, line(50, 160, 250, 160));
+  fx = LayerFx();
+  fx.hue = 120;
+  e.setLayerFx(0, fx);
+  const uint8_t *h = render(e, 0).at(150, 160);
+  printf("  red rotated by 120 deg = (%d,%d,%d)\n", h[0], h[1], h[2]);
+  CHECK(h[1] > h[0] + 40);
+  savePng(render(e, 0), "12_fx.png");
+  e.undo();
+  CHECK(render(e, 0).at(150, 160)[0] > 180);
+  std::string err, dir = g_out + "/fxproj";
+  CHECK(e.save(dir, &err));
+  Img before = render(e, 0);
+  e.newDocument(10, 10, 12);
+  CHECK(e.load(dir, &err));
+  CHECK(e.layerFx(0).glow == 8 && sameImg(before, render(e, 0)));
+}
+
+static void testVector(Engine &e) {
+  section("vector layers (TVectorImage/TStroke, CPU rasterizer, .pli)");
+  e.newDocument(400, 300, 12);
+  int v = e.addLayerOfType(2);
+  CHECK(e.doc()->layer(v)->type == LayerType::Vector);
+  e.tool = Tool::Brush;
+  e.settings.brushMax = 6;
+  e.settings.pressure = false;
+  stroke(e, line(50, 50, 350, 50));
+  TVectorImageP vi = e.doc()->image(e.doc()->layer(v), 0);
+  CHECK(vi && vi->getStrokeCount() == 1);
+  CHECK(isDark(render(e, 0).at(200, 50)));
+  // closed ellipse (shape tool) + region fill
+  e.drawShape((int)ShapeType::Ellipse, 100, 100, 300, 250);
+  vi = e.doc()->image(e.doc()->layer(v), 0);
+  printf("  strokes=%u regions=%u\n", vi->getStrokeCount(), vi->getRegionCount());
+  CHECK(vi->getStrokeCount() == 2);
+  e.tool = Tool::Fill;
+  e.doc()->currentStyle = 7;  // blue
+  e.pointerDown(200, 175, 1);
+  e.pointerUp(200, 175);
+  const uint8_t *f = render(e, 0).at(200, 175);
+  printf("  vector region fill = (%d,%d,%d)\n", f[0], f[1], f[2]);
+  CHECK(f[2] > 180 && f[0] < 90);
+  CHECK(isWhite(render(e, 0).at(50, 200)));
+  savePng(render(e, 0), "13_vector.png");
+  // resolution independence: camera zoom 3x keeps a crisp 6px line -> ~18px
+  // the ellipse top (y=100, 6px thick) seen through a 2x camera zoom about
+  // the centre lands at y=50 and must be ~12px thick, still crisp
+  Xform cam;
+  cam.scale = 2;
+  e.setKey(-1, 0, cam, Ease::Linear);
+  int thick = 0;
+  Img z = render(e, 0);
+  for (int y = 30; y < 70; y++) thick += isDark(z.at(200, y)) ? 1 : 0;
+  printf("  zoom 2x: 6px vector line -> %d dark px\n", thick);
+  CHECK(thick >= 10 && thick <= 14);
+  e.undo();
+  // selection: move the line 100 px down
+  e.tool = Tool::Select;
+  CHECK(e.selectRect(40, 40, 360, 60));
+  e.transformSelection(0, 30, 1, 0);
+  e.commitSelection();
+  CHECK(isDark(render(e, 0).at(200, 80)) && !isDark(render(e, 0).at(200, 50)));
+  e.undo();
+  CHECK(isDark(render(e, 0).at(200, 50)));
+  // stroke eraser
+  e.tool = Tool::Eraser;
+  e.settings.eraserSize = 20;
+  stroke(e, line(200, 40, 200, 60));
+  vi = e.doc()->image(e.doc()->layer(v), 0);
+  CHECK(vi->getStrokeCount() == 1);
+  CHECK(!isDark(render(e, 0).at(200, 50)));
+  e.undo();
+  vi = e.doc()->image(e.doc()->layer(v), 0);
+  CHECK(vi->getStrokeCount() == 2);
+  // save as OpenToonz .pli, reload
+  std::string err, dir = g_out + "/vecproj";
+  Img before = render(e, 0);
+  CHECK(e.save(dir, &err));
+  if (!err.empty()) printf("  save error: %s\n", err.c_str());
+  CHECK(QFile::exists(QString::fromStdString(dir + "/levels/Vector_2_2.pli")));
+  e.newDocument(10, 10, 12);
+  CHECK(e.load(dir, &err));
+  if (!err.empty()) printf("  load error: %s\n", err.c_str());
+  TVectorImageP lv = e.doc()->image(e.doc()->layer(1), 0);
+  CHECK(lv && lv->getStrokeCount() == 2);
+  CHECK(sameImg(before, render(e, 0), 6));
+  e.settings = ToolSettings();
+}
+
 static void testExport(Engine &e) {
   section("export GIF + PNG sequence");
   e.newDocument(320, 180, 10);
@@ -845,6 +1010,9 @@ int main(int argc, char **argv) {
   testShapesAndLasso(e);
   testTiming(e);
   testKeyframes(e);
+  testRig(e);
+  testFx(e);
+  testVector(e);
   testExport(e);
   testGifQuantizer();
   testMemoryAndPerf(e);
