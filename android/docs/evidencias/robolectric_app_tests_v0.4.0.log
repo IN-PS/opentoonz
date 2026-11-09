@@ -1,0 +1,70 @@
+AppFlowTest > t10_audioTrackWaveform STANDARD_OUT
+    [app-test] audio: 12 frame peaks; frame1=0.48825073 frame12=0.0
+    [app-test] audio playback toggle OK
+AppFlowTest > t10_audioTrackWaveform PASSED
+AppFlowTest > t11_vectorLayerFxRigAndTexture STANDARD_OUT
+    [app-test] vector region fill from the UI = #FF2878DC
+    [app-test] drop shadow 30 px below the vector line = #FF333333
+    [app-test] grain brush: centre line values range 81..255
+AppFlowTest > t11_vectorLayerFxRigAndTexture PASSED
+AppFlowTest > t12_multipleAudioTracks STANDARD_OUT
+    [app-test] mixdown: 44100 Hz, 2 ch, 88200 frames
+    [app-test] mix at 0.6 s = 18000 (expected 8000 + 10000)
+    [app-test] two audio tracks shown in the timeline; mixdown OK
+AppFlowTest > t12_multipleAudioTracks PASSED
+AppFlowTest > t13_importDesktopTnz STANDARD_OUT
+    [app-test] import notes: Imported. Notes:
+    [app-test] imported PLI fill at row 2 = #FF1E3CE6
+    [app-test] desktop .tnz imported into a mobile project and opened in the editor
+AppFlowTest > t13_importDesktopTnz PASSED
+AppFlowTest > t14_myPaintBrushes STANDARD_OUT
+    [app-test] MyPaint presets in the assets: 271
+    [app-test] brush button: Brush: classic/charcoal
+    [app-test] charcoal stroke from the UI: 1324 px, 1078 partial tones
+AppFlowTest > t14_myPaintBrushes PASSED
+AppFlowTest > t1_projectManagerCreatesProject STANDARD_OUT
+    [app-test] project created: /tmp/robolectric-Method_t1_projectManagerCreatesProject5429107147429466107/org.opentoonz.mobile-dataDir/files/projects/Test One files=[levels, project.otm, palette.tpl, thumbnail.png]
+AppFlowTest > t1_projectManagerCreatesProject PASSED
+AppFlowTest > t2_drawFramesOnionLayersFillUndoSelectPlaySaveReopen STANDARD_OUT
+    [app-test] canvas view 846x370, document 960x540
+    [app-test] brush stroke OK
+    [app-test] frame 2 drawn; timeline frames=2
+    [app-test] onion pixel = #FFFFAFAF
+    [app-test] layers OK
+    [app-test] fill pixel = #FF2878DC
+    [app-test] fill + undo/redo OK
+    [app-test] after move: (250,120)=#FFFFFFFF (450,120)=#FFE62828 (450,130)=#FFE62828
+    [app-test] selection move OK
+    [app-test] playback OK, current row 2
+    [app-test] saved levels: [Layer_2_2.tpl, Layer_2_2.tlv, Layer_1_1.tpl, Layer_1_1.tlv]
+    [app-test] reopen: differing pixels = 0
+AppFlowTest > t2_drawFramesOnionLayersFillUndoSelectPlaySaveReopen PASSED
+AppFlowTest > t3_autosaveOnPause STANDARD_OUT
+    [app-test] autosave on pause OK
+AppFlowTest > t3_autosaveOnPause PASSED
+AppFlowTest > t4_importAndExport STANDARD_OUT
+    [app-test] import flow OK (raster layer added)
+    [app-test] GIF exported: 6462 bytes (ImportExport.gif)
+    [app-test] PNG sequence: [ImportExport.0001.png, ImportExport.0002.png]
+    [app-test] MP4 on JVM: encoder produced a file
+AppFlowTest > t4_importAndExport PASSED
+AppFlowTest > t5_rotationKeepsWorking STANDARD_OUT
+    [app-test] portrait: drawing still works, canvas 846x370
+AppFlowTest > t5_rotationKeepsWorking PASSED
+AppFlowTest > t6_stylusPressure STANDARD_OUT
+    [app-test] stylus tool type visible to the UI under Robolectric 3.8: false (legacy MotionEvent shadow drops toolType; UI stylus path needs a device)
+    [app-test] stylus: line width at low pressure=1px, high pressure=21px
+AppFlowTest > t6_stylusPressure PASSED
+AppFlowTest > t7_shapesLassoAndProBrushUi STANDARD_OUT
+    [app-test] shape tool: rectangle drawn
+    [app-test] lasso selection: moved only the enclosed pixels
+AppFlowTest > t7_shapesLassoAndProBrushUi PASSED
+AppFlowTest > t8_keyframesLayerAndCamera STANDARD_OUT
+    [app-test] layer keys at rows [0, 9]
+    [app-test] interpolated x at frame 6 = 233.19618
+    [app-test] camera x = 50.0
+AppFlowTest > t8_keyframesLayerAndCamera PASSED
+AppFlowTest > t9_timingAndCellMove STANDARD_OUT
+    [app-test] reframe on 2s: 3 drawings -> 6 frames
+    [app-test] timeline cell move OK
+AppFlowTest > t9_timingAndCellMove PASSED

@@ -618,6 +618,22 @@ JF(void, setBrushTexture)(JNIEnv *, jclass, jint grain, jint scatter) {
   E().settings.grain   = std::max(0, std::min(100, (int)grain));
   E().settings.scatter = std::max(0, std::min(100, (int)scatter));
 }
+// MyPaint: json = contents of a .myb preset (null = back to the OpenToonz
+// brush engines); size = desktop "Size" modifier (log2 steps, -3..3)
+JF(jboolean, setMyPaintBrush)(JNIEnv *env, jclass, jstring json, jfloat size) {
+  std::lock_guard<std::recursive_mutex> lk(E().mutex());
+  E().settings.myPaintSize = std::max(-3.f, std::min(3.f, (float)size));
+  if (!json) {
+    E().settings.myPaint.reset();
+    return JNI_TRUE;
+  }
+  auto b = loadMyPaintBrush(str(env, json));
+  E().settings.myPaint = b;
+  return b ? JNI_TRUE : JNI_FALSE;
+}
+JF(jboolean, isMyPaintAvailable)(JNIEnv *, jclass) {
+  return myPaintAvailable() ? JNI_TRUE : JNI_FALSE;
+}
 static std::vector<std::string> g_importWarnings;
 JF(jstring, importTnz)(JNIEnv *env, jclass, jstring path) {
   std::string err;

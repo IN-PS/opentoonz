@@ -249,6 +249,48 @@ if(UNIX AND NOT ANDROID)
   target_link_libraries(otm_opentoonz PUBLIC pthread)
 endif()
 
+# ---------------------------------------------------------------- MyPaint
+# libmypaint 1.6 + json-c 0.17 (sources: tools/fetch-mypaint.sh) and the
+# OpenToonz MyPaint adapter (tnztools/mypainttoonzbrush.cpp), as used by the
+# desktop Toonz Raster / Raster brush tools.
+set(OTM_MYPAINT_DIR "" CACHE PATH "libmypaint-1.6.0 source dir (empty = no MyPaint)")
+set(OTM_JSONC_DIR "" CACHE PATH "json-c 0.17 source dir")
+if(OTM_MYPAINT_DIR AND OTM_JSONC_DIR)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+  set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+  set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+  set(BUILD_APPS OFF CACHE BOOL "" FORCE)
+  set(DISABLE_EXTRA_LIBS ON CACHE BOOL "" FORCE)
+  set(DISABLE_WERROR ON CACHE BOOL "" FORCE)
+  set(DISABLE_BSYMBOLIC ON CACHE BOOL "" FORCE)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+  add_subdirectory(${OTM_JSONC_DIR} ${CMAKE_CURRENT_BINARY_DIR}/json-c EXCLUDE_FROM_ALL)
+  # the tarball's config.h is the one of a Linux autotools build (gettext,
+  # glib); sources are copied without it and get a minimal one instead
+  set(MP ${CMAKE_CURRENT_BINARY_DIR}/mypaint-src)
+  file(GLOB _mp_files ${OTM_MYPAINT_DIR}/*.c ${OTM_MYPAINT_DIR}/*.h)
+  list(FILTER _mp_files EXCLUDE REGEX "/config\\.h$")
+  file(COPY ${_mp_files} DESTINATION ${MP})
+  file(COPY ${OTM_MYPAINT_DIR}/fastapprox ${OTM_MYPAINT_DIR}/glib DESTINATION ${MP})
+  file(WRITE ${MP}/config.h
+    "/* OpenToonz Mobile: no gettext, no glib, no OpenMP */\n#define GETTEXT_PACKAGE \"libmypaint\"\n")
+  add_library(otm_mypaint STATIC
+    ${MP}/brushmodes.c ${MP}/fifo.c ${MP}/helpers.c ${MP}/mypaint-mapping.c
+    ${MP}/mypaint.c ${MP}/mypaint-brush.c ${MP}/mypaint-brush-settings.c
+    ${MP}/mypaint-fixed-tiled-surface.c ${MP}/mypaint-matrix.c
+    ${MP}/mypaint-symmetry.c ${MP}/mypaint-rectangle.c ${MP}/mypaint-surface.c
+    ${MP}/mypaint-tiled-surface.c ${MP}/operationqueue.c ${MP}/rng-double.c
+    ${MP}/tilemap.c)
+  target_include_directories(otm_mypaint PUBLIC ${MP})
+  target_compile_definitions(otm_mypaint PRIVATE MYPAINT_CONFIG_USE_GLIB=0)
+  target_compile_options(otm_mypaint PRIVATE -w -std=gnu99)
+  target_link_libraries(otm_mypaint PUBLIC json-c m)
+  set(OTM_HAVE_MYPAINT ON)
+  message(STATUS "MyPaint brushes: ON (${OTM_MYPAINT_DIR})")
+else()
+  message(STATUS "MyPaint brushes: OFF (set OTM_MYPAINT_DIR / OTM_JSONC_DIR)")
+endif()
+
 # ---------------------------------------------------------------- mobile engine
 add_library(otm_core STATIC
   src/document.cpp
@@ -261,6 +303,12 @@ add_library(otm_core STATIC
   src/engine.cpp)
 target_include_directories(otm_core PUBLIC src)
 target_link_libraries(otm_core PUBLIC otm_opentoonz)
+if(OTM_HAVE_MYPAINT)
+  target_sources(otm_core PRIVATE ${OT_SRC}/tnztools/mypainttoonzbrush.cpp)
+  target_include_directories(otm_core PRIVATE ${OT_SRC}/tnztools)
+  target_compile_definitions(otm_core PUBLIC OTM_HAVE_MYPAINT)
+  target_link_libraries(otm_core PUBLIC otm_mypaint)
+endif()
 target_compile_options(otm_core PRIVATE -Wall -Wno-unused-parameter)
 
 if(OTM_BUILD_JNI)
@@ -289,5 +337,6 @@ if(OTM_BUILD_TESTS AND NOT ANDROID)
   add_dependencies(otm_tests lzocompress lzodecompress)
   target_compile_definitions(otm_tests PRIVATE
     OTM_TEST_LZO_DIR="${CMAKE_CURRENT_BINARY_DIR}"
-    OTM_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
+    OTM_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
+    OTM_TEST_MYPAINT_DIR="${OT_ROOT}/stuff/library/mypaint brushes")
 endif()

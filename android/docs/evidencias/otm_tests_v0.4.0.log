@@ -1,0 +1,67 @@
+[brush stroke on Toonz Raster (RasterStrokeGenerator)]
+[multi-frame animation + onion skin]
+  onion prev=(255,175,175) next=(170,226,179)
+[layers: order, visibility, opacity, lock]
+  50% red over white = (242,147,147)
+[fill (toonzlib fill.cpp) + eraser + palette recolour]
+[selection + transform (TRop::resample / TRop::over on CM32)]
+[undo / redo (TUndoManager)]
+[import PNG + image sequence (raster layers)]
+  imported centre = (127,125,128)
+[save / load project (TLV + TPL + PNG + project.otm)]
+  levels: in_small_2.0001.png, Ink___Paint_1.tlv, Ink___Paint_1.tpl
+  bad project -> "not an OpenToonz Mobile project"
+[save/load from a worker thread (Android autosave path)]
+[soft brush (hardness/opacity) + stabilizer]
+  soft brush centre=2 edge=236
+  50% opacity stroke = 127 / 127
+  soft eraser at the edge: 2 -> 49
+  stabilizer: dark pixels across the zig-zag at x=200: 4
+[textured brush: paper grain + scatter]
+  grain 90: values along the stroke 27..255
+  scatter 100: 276 px of ink beyond the brush radius
+[shape tool (line/rect/ellipse) + lasso selection]
+[timing: reframe on twos/threes, exposure]
+[keyframes: layer + camera animation, ease, drawing on moved layer]
+  ease-in-out at 1/4: x=31.25 (linear would be 50)
+  rotated+50% pixel = (127,127,127)
+  stroke drawn on the moved layer, under the finger: value 64
+[peg hierarchy + pivot (cut-out rig, forward kinematics)]
+  canvas drag (10,0) in the forearm's parent frame = (0.00, -10.00)
+[layer effects: blur, shadow, glow, colour adjust]
+  blur: 2px outside the edge=213 (sharp: 255)
+  glow 3px outside the line = (255,247,216)
+  red rotated by 120 deg = (3,179,0)
+[vector layers (TVectorImage/TStroke, CPU rasterizer, .pli)]
+  strokes=2 regions=0
+varName:TOONZPROFILES TOONZROOT not set...
+varName:TOONZROOT TOONZROOT not set...
+varName:TOONZPROFILES TOONZROOT not set...
+varName:TOONZROOT TOONZROOT not set...
+  vector region fill = (40,120,220)
+  zoom 2x: 6px vector line -> 12 dark px
+[desktop .tnz import (scene saved by desktop toonzlib)]
+  warning: FX schematic nodes are not imported
+  1920x1080 @12 fps, 3 layers, 5 rows
+  TLV drawing 3 pixel = (230,30,30)
+  PLI square left edge x=618 (expected ~622)
+  PLI region fill = (30,60,230)
+[MyPaint brushes (libmypaint + OpenToonz presets)]
+  pen on Toonz Raster: line 2 px thick
+  size +2: 10 px thick
+  charcoal: 2517 touched px, 1430 partial tones
+  pen on Raster layer = (40,120,220)
+[export GIF + PNG sequence]
+  gif export: 12.8 ms for 8 frames
+[GIF quantizer]
+[memory (TImageCache compression) + performance, 1280x720 x 120 frames]
+  stroke segment avg: 0.025 ms
+  process RSS: 51304 KB -> 93272 KB (+41968 KB) for 120 CM32 frames; uncompressed drawings alone would be 432000 KB
+  full-frame render (onion on): 5.56 ms
+  64x64 dirty-rect render: 0.028 ms
+  save 120 frames (full): 3738 ms
+  save after editing 1 frame of a new layer (incremental): 42 ms
+  save with no level changes: 1 ms
+  load 120 frames: 3769 ms
+
+233 checks passed, 0 failed

@@ -99,6 +99,16 @@ NDK oficial do Google** (o `libc++_shared.so` vai dentro do APK). A partir
 da v0.3.0 os APKs publicados usam o NDK oficial r27c (27.2.12479018) para o
 Qt5Core e para o motor.
 
+## 6a. Pincéis MyPaint
+
+`android/tools/fetch-mypaint.sh <pasta>` baixa e confere (SHA-256) os
+tarballs do Ubuntu de libmypaint 1.6.0 e json-c 0.17. Passe a pasta em
+`MYPAINT_SRC` para o `build-apk.sh` (ou `-DOTM_MYPAINT_DIR`/`-DOTM_JSONC_DIR`
+ao CMake). Sem isso, o APK sai sem MyPaint (o botão não aparece). O
+`config.h` do tarball (autotools/Linux, com gettext e glib) não é usado: o
+CMake copia as fontes e gera um mínimo. Os presets vêm de
+`stuff/library/mypaint brushes` e entram no APK como *assets*.
+
 ## 6b. Teste de compatibilidade com cenas do desktop
 
 `android/tools/tnzcompat/build.sh <build-desktop> <fonte> <saida>` compila o

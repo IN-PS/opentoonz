@@ -8,7 +8,12 @@ ROOT=$HERE/..
 OUT=$ROOT/out/hosttest
 mkdir -p "$OUT"
 # 1. native engine for the host (same sources as the APK)
-cmake -S "$ROOT/engine" -B "$OUT/native" -G Ninja -DCMAKE_BUILD_TYPE=Release -DOTM_BUILD_JNI=ON >/dev/null
+#    with MyPaint (sources fetched once, checksum-verified)
+MYPAINT_SRC=${MYPAINT_SRC:-$OUT/mypaint-src}
+bash "$ROOT/tools/fetch-mypaint.sh" "$MYPAINT_SRC" >/dev/null
+cmake -S "$ROOT/engine" -B "$OUT/native" -G Ninja -DCMAKE_BUILD_TYPE=Release -DOTM_BUILD_JNI=ON \
+  -DOTM_MYPAINT_DIR="$MYPAINT_SRC/libmypaint-1.6.0" \
+  -DOTM_JSONC_DIR="$MYPAINT_SRC/json-c-json-c-0.17-20230812" >/dev/null
 cmake --build "$OUT/native" --target otmengine lzocompress lzodecompress otm_tests
 # 2. resources (aapt2) + R.java exactly as for the APK
 SDK=${ANDROID_SDK_ROOT:-/usr/lib/android-sdk}

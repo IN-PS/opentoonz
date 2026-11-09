@@ -121,4 +121,9 @@
     <string name="copying">Copying folder…</string>
     <string name="no_tnz">No .tnz scene found in that folder</string>
     <string name="vector">Vector</string>
+    <string name="mypaint_brushes">MyPaint brushes</string>
+    <string name="mypaint_off">OpenToonz brush</string>
+    <string name="mypaint_button">Brush: %1$s</string>
+    <string name="mypaint_size">MyPaint size</string>
+    <string name="mypaint_invalid">This brush could not be loaded</string>
 </resources>

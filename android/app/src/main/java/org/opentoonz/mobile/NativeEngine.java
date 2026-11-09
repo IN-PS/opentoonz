@@ -155,4 +155,9 @@ public final class NativeEngine {
     /** Opens a desktop OpenToonz scene; null on success, else an error. */
     public static native String importTnz(String tnzPath);
     public static native String[] getImportWarnings();
+
+    // MyPaint brushes (libmypaint + OpenToonz MyPaintToonzBrush)
+    /** json = .myb preset contents, null = OpenToonz brush; size = log2 modifier -3..3. */
+    public static native boolean setMyPaintBrush(String json, float size);
+    public static native boolean isMyPaintAvailable();
 }

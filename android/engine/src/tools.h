@@ -20,6 +20,8 @@ class TTileSetCM32;
 class TTileSaverCM32;
 class TTileSetFullColor;
 class TTileSaverFullColor;
+namespace mypaint { class Brush; }
+class MyPaintToonzBrush;
 
 namespace otm {
 
@@ -48,7 +50,16 @@ struct ToolSettings {
   int eraserHardness = 100;
   int grain          = 0;     // 0..100 paper texture (pencil / chalk look)
   int scatter        = 0;     // 0..100 random dab offset (spray / textured)
+  // MyPaint brush preset (.myb, libmypaint); null = OpenToonz brush engines.
+  // Used by the Brush tool on Toonz Raster and Raster layers, like the
+  // desktop brush tools when a MyPaint style is selected.
+  std::shared_ptr<const mypaint::Brush> myPaint;
+  double myPaintSize = 0;     // size modifier, log2 steps (-3..3, desktop "Size")
 };
+
+//! Loads a MyPaint .myb preset (JSON); null if invalid or MyPaint is not built.
+std::shared_ptr<const mypaint::Brush> loadMyPaintBrush(const std::string &json);
+bool myPaintAvailable();
 
 //! Records the pixels of one drawing that a tool is about to change, and
 //! turns them into an undo/redo record.  Works for CM32 and 32-bit images.
@@ -91,6 +102,19 @@ private:
   TRasterP m_backup;     // drawing before the stroke
   TThickPoint m_lastSoft;
   bool m_softMode = false;
+  // MyPaint engine
+  class MyPaintCtl;
+  friend class MyPaintCtl;
+  bool beginMyPaint(const TPointD &p, double pressure);
+  TRect myPaintTo(const TPointD &p, double pressure, bool last);
+  TPointD m_mpLast;
+  std::unique_ptr<MyPaintCtl> m_mpCtl;
+  std::unique_ptr<MyPaintToonzBrush> m_mp;
+  TRaster32P m_mpWork;           // stroke coverage (Toonz Raster layers)
+  TRasterCM32P m_mpBackup;       // drawing before the stroke (Toonz Raster)
+  TRect m_mpSeg;                 // pixels touched by the last segment
+  bool m_mpEraser = false;
+  double m_mpTime = 0;           // seconds, monotonic
   unsigned m_rng = 12345;  // deterministic scatter per stroke
   TPointD m_sp;          // stabilizer state
   double m_spPressure = 1;

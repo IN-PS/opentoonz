@@ -7,8 +7,10 @@
 #include "traster.h"
 #include "trastercm.h"
 #include "tcurves.h"
+#ifndef OTM_NO_QTGUI  // OpenToonz Mobile: QtCore only
 #include <QPainter>
 #include <QImage>
+#endif
 
 class RasterController {
 public:

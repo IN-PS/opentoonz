@@ -120,4 +120,9 @@
     <string name="copying">Copiando pasta…</string>
     <string name="no_tnz">Nenhuma cena .tnz encontrada nessa pasta</string>
     <string name="vector">Vetorial</string>
+    <string name="mypaint_brushes">Pincéis MyPaint</string>
+    <string name="mypaint_off">Pincel OpenToonz</string>
+    <string name="mypaint_button">Pincel: %1$s</string>
+    <string name="mypaint_size">Tamanho MyPaint</string>
+    <string name="mypaint_invalid">Não foi possível carregar este pincel</string>
 </resources>

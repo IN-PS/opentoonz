@@ -1,7 +1,7 @@
 # OpenToonz Mobile — Relatório de funcionalidades, testes e pendências
 
-**Estado (honesto):** APKs debug e release **gerados** (v0.3.0, motor 220/220, app na JVM 13/13, arm64-v8a,
-`android/releases/v0.3.0/`, publicados em GitHub Releases), assinados e verificados (apksigner v2/v3), com
+**Estado (honesto):** APKs debug e release **gerados** (v0.4.0, motor 233/233, app na JVM 14/14, arm64-v8a,
+`android/releases/v0.4.0/`), assinados e verificados (apksigner v2/v3), com
 todas as dependências nativas resolvidas. **Ainda não foram instalados nem
 executados num aparelho ARM64** — o port só pode ser considerado concluído
 após esse teste. Ver §4.
@@ -50,7 +50,25 @@ físico, exportação de sequência PNG, interface em português e inglês.
 | Caneta digital | pressão (`getPressure`), `TOOL_TYPE_STYLUS/ERASER`, cursor em *hover*, rejeição de palma (após detectar caneta, dedos só navegam) |
 | Horizontal e vertical | `configChanges` tratados; layout em blocos que se adapta às duas orientações |
 
-## 0. Versão 0.3.0 — vetores, rig, efeitos, .tnz do desktop
+## 0. Versão 0.4.0 — pincéis MyPaint
+
+* **libmypaint 1.6.0 + json-c 0.17** compilados no motor (fontes do arquivo
+  do Ubuntu com SHA-256 verificado, `tools/fetch-mypaint.sh`), com o
+  adaptador do próprio OpenToonz `tnztools/mypainttoonzbrush.cpp`
+  (`MyPaintToonzBrush`), igual ao desktop: em camadas **Toonz Raster** o
+  pincel gera cobertura que vira tinta do estilo atual (`putOnRasterCM`;
+  recolorível pela paleta); em camadas **Raster** pinta direto com a cor do
+  estilo. Presets de borracha (ex.: `ink_eraser`) apagam.
+* **271 presets** do OpenToonz (`stuff/library/mypaint brushes`, CC0) com
+  miniaturas, num seletor em grade; ajuste de tamanho (−3..+3, como o "Size"
+  do desktop), pressão e estabilizador; desfazer/refazer.
+* Testes: motor **233/233** (pen, carvão texturizado, tamanho, desfazer,
+  borracha MyPaint, camada Raster); app na JVM **14/14** (escolher preset na
+  grade, traço pela tela, voltar ao pincel OpenToonz).
+* Não suportado: MyPaint em camadas vetoriais (o desktop também não),
+  inclinação da caneta (tilt) e edição dos parâmetros internos do preset.
+
+## 0a. Versão 0.3.0 — vetores, rig, efeitos, .tnz do desktop
 
 * **Camadas vetoriais** (`TVectorImage`/`TStroke` do tnzcore, salvas em
   `.pli`): pincel, formas, preenchimento de regiões, seleção/transformação,
@@ -165,9 +183,8 @@ oficial (`android/docs/COMPILACAO.md`).
   grava `.tnz` (grava `.tlv`/`.tpl`/`.pli`/`.png` compatíveis).
 * Ferramentas vetoriais avançadas (Geometric com todos os modos, *tape*,
   *inbetween* vetorial, *control point editor*).
-* Pincel **MyPaint** (libmypaint + json-c não foram compilados neste
-  ambiente; o pincel texturizado próprio cobre parte do uso) e pincéis
-  personalizados.
+* Editor de pincéis MyPaint e pincéis personalizados (os presets MyPaint
+  funcionam desde a v0.4.0, sem edição dos parâmetros).
 * Sistema de FX completo (`tnzbase`, `stdfx`, `colorfx`), schematic, render
   farm — a v0.3.0 tem um conjunto próprio de efeitos por camada.
 * Curvas de função e expressões do `TStageObject`; **esqueleto com IK** e
@@ -183,3 +200,6 @@ oficial (`android/docs/COMPILACAO.md`).
 build desktop): `include/tgl.h`, `include/toonz/fill.h`,
 `common/tsystem/tsystem.cpp`, `common/tsystem/tsystempd.cpp`,
 `common/tiio/tiio.cpp`, `common/trasterimage/tcodec.cpp`.
+Depois: `common/tcache/timagecache.cpp` (correção real de bug, v0.2.0) e
+`tnztools/mypainttoonzbrush.h/.cpp` (includes de QtGui sob `OTM_NO_QTGUI`,
+v0.4.0).

@@ -14,6 +14,7 @@
 #include "tsystem.h"
 #include "tundo.h"
 #include "tvectorimage.h"
+#include "tools.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -1060,6 +1061,89 @@ static void testTnzImport(Engine &e) {
   savePng(r4, "16_tnz_import_row4.png");
 }
 
+
+static std::string readFile(const std::string &path) {
+  std::ifstream f(path, std::ios::binary);
+  std::stringstream ss;
+  ss << f.rdbuf();
+  return ss.str();
+}
+static std::shared_ptr<const mypaint::Brush> myb(const char *name) {
+  return loadMyPaintBrush(readFile(std::string(OTM_TEST_MYPAINT_DIR "/") + name + ".myb"));
+}
+
+// MyPaint brushes (libmypaint 1.6 + OpenToonz MyPaintToonzBrush) with the
+// presets shipped in OpenToonz stuff/library/mypaint brushes
+static void testMyPaint(Engine &e) {
+  section("MyPaint brushes (libmypaint + OpenToonz presets)");
+  CHECK(myPaintAvailable());
+  if (!myPaintAvailable()) return;
+  CHECK(!loadMyPaintBrush("not a brush"));
+  auto pen = myb("classic/pen"), charcoal = myb("classic/charcoal"),
+       eraser = myb("classic/ink_eraser");
+  CHECK(pen && charcoal && eraser);
+  if (!pen || !charcoal || !eraser) return;
+  e.newDocument(400, 300, 12);
+  e.tool               = Tool::Brush;
+  e.settings.pressure  = true;
+  e.settings.myPaint   = pen;
+  e.settings.myPaintSize = 0;
+  e.doc()->currentStyle = 1;
+  stroke(e, line(50, 100, 350, 100, 60), 0.8);
+  Img a = render(e, 0);
+  int thin = darkCount(a, 200, 80, 120);
+  printf("  pen on Toonz Raster: line %d px thick\n", thin);
+  CHECK(thin >= 1 && isWhite(a.at(200, 140)));
+  // the result is Toonz Raster ink of the current style (palette editable)
+  TToonzImageP ti = e.doc()->image(e.doc()->layer(0), 0);
+  CHECK(ti && ti->getRaster()->pixels(299 - 100)[200].getInk() == 1);
+  // bigger size modifier = thicker line
+  e.settings.myPaintSize = 2;
+  stroke(e, line(50, 200, 350, 200, 60), 0.8);
+  int thick = darkCount(render(e, 0), 200, 160, 240);
+  printf("  size +2: %d px thick\n", thick);
+  CHECK(thick > thin * 2);
+  // undo / redo of a MyPaint stroke
+  e.undo();
+  CHECK(darkCount(render(e, 0), 200, 160, 240) == 0);
+  e.redo();
+  CHECK(darkCount(render(e, 0), 200, 160, 240) == thick);
+  // charcoal: textured, partial coverage (tones between ink and paper)
+  e.settings.myPaintSize = 1;
+  e.settings.myPaint     = charcoal;
+  stroke(e, line(50, 250, 350, 250, 60), 0.9);
+  Img c = render(e, 0);
+  int partial = 0, any = 0;
+  for (int x = 60; x < 340; x++)
+    for (int y = 235; y < 265; y++) {
+      int g = c.at(x, y)[0];
+      if (g < 250) any++;
+      if (g > 40 && g < 215) partial++;
+    }
+  printf("  charcoal: %d touched px, %d partial tones\n", any, partial);
+  CHECK(any > 500 && partial > any / 10);
+  savePng(c, "17_mypaint_toonzraster.png");
+  // MyPaint eraser preset on Toonz Raster removes the pen line
+  e.settings.myPaint     = eraser;
+  e.settings.myPaintSize = 2;
+  stroke(e, line(150, 100, 250, 100, 30), 1.0);
+  Img er = render(e, 0);
+  CHECK(isWhite(er.at(200, 100)) && isDark(er.at(100, 100)));
+  // full-colour (Raster) layer: painted with the current style colour
+  int rl = e.addLayerOfType(1);
+  CHECK(e.doc()->layer(rl)->type == LayerType::Raster);
+  e.doc()->currentStyle  = 7;  // blue
+  e.settings.myPaint     = pen;
+  e.settings.myPaintSize = 2;
+  stroke(e, line(50, 40, 350, 40, 60), 0.9);
+  const uint8_t *b = render(e, 0).at(200, 40);
+  printf("  pen on Raster layer = (%d,%d,%d)\n", b[0], b[1], b[2]);
+  CHECK(b[2] > 150 && b[0] < 110);
+  e.undo();
+  CHECK(isWhite(render(e, 0).at(200, 40)));
+  e.settings.myPaint.reset();
+}
+
 int main(int argc, char **argv) {
   setvbuf(stdout, nullptr, _IONBF, 0);
   QCoreApplication app(argc, argv);
@@ -1086,6 +1170,7 @@ int main(int argc, char **argv) {
   testFx(e);
   testVector(e);
   testTnzImport(e);
+  testMyPaint(e);
   testExport(e);
   testGifQuantizer();
   testMemoryAndPerf(e);

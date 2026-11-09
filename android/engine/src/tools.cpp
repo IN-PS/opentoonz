@@ -12,8 +12,15 @@
 #include "tundo.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include "tcolorstyles.h"
+
+#ifdef OTM_HAVE_MYPAINT
+#include "mypainttoonzbrush.h"  // OpenToonz tnztools: MyPaint <-> TRaster adapter
+#else
+class MyPaintToonzBrush {};
+#endif
 
 namespace otm {
 
@@ -174,6 +181,129 @@ void RasterChange::commit(const std::string &label) {
 //=============================================================================
 // StrokeSession
 
+
+//=============================================================================
+// MyPaint brushes (libmypaint through the OpenToonz MyPaintToonzBrush adapter)
+
+#ifdef OTM_HAVE_MYPAINT
+// Called by the MyPaint surface before it reads/writes a rectangle: records
+// the undo tiles and the area changed by the current segment (same role as
+// ToonzRasterBrushTool::askWrite on desktop).
+class StrokeSession::MyPaintCtl final : public RasterController {
+public:
+  explicit MyPaintCtl(StrokeSession *s) : m_s(s) {}
+  bool askRead(const TRect &) override { return true; }
+  bool askWrite(const TRect &rect) override {
+    TRect r = rect * rasterOf(m_s->m_img)->getBounds();
+    if (r.isEmpty()) return true;
+    m_s->m_mpSeg += r;
+    m_s->m_change->save(r);
+    return true;
+  }
+
+private:
+  StrokeSession *m_s;
+};
+
+bool myPaintAvailable() { return true; }
+
+std::shared_ptr<const mypaint::Brush> loadMyPaintBrush(const std::string &json) {
+  auto b = std::make_shared<mypaint::Brush>();
+  if (json.empty() || !b->fromString(json)) return nullptr;
+  return b;
+}
+
+static double secondsNow() {
+  using namespace std::chrono;
+  return duration<double>(steady_clock::now().time_since_epoch()).count();
+}
+
+static void rgbToHsv(const TPixel32 &c, float &h, float &s, float &v) {
+  float r = c.r / 255.f, g = c.g / 255.f, b = c.b / 255.f;
+  float mx = std::max(r, std::max(g, b)), mn = std::min(r, std::min(g, b));
+  float d = mx - mn;
+  v = mx;
+  s = mx > 0 ? d / mx : 0;
+  if (d <= 0) { h = 0; return; }
+  if (mx == r)      h = (g - b) / d;
+  else if (mx == g) h = 2 + (b - r) / d;
+  else              h = 4 + (r - g) / d;
+  h /= 6;
+  if (h < 0) h += 1;
+}
+
+bool StrokeSession::beginMyPaint(const TPointD &p, double pressure) {
+  TToonzImageP ti = m_img;
+  TRasterImageP ri = m_img;
+  if (m_tool != Tool::Brush || !m_s.myPaint || (!ti && !ri)) return false;
+  mypaint::Brush b(*m_s.myPaint);
+  float radius = b.getBaseValue(MYPAINT_BRUSH_SETTING_RADIUS_LOGARITHMIC);
+  b.setBaseValue(MYPAINT_BRUSH_SETTING_RADIUS_LOGARITHMIC,
+                 radius + float(m_s.myPaintSize * std::log(2.0)));
+  m_mpEraser = b.getBaseValue(MYPAINT_BRUSH_SETTING_ERASER) > 0.5f;
+  m_mpCtl.reset(new MyPaintCtl(this));
+  if (ti) {
+    // as ToonzRasterBrushTool: the brush paints coverage into a 32-bit work
+    // raster, which putOnRasterCM turns into ink (or erases) of the CM32
+    if (m_mpEraser) {
+      b.setBaseValue(MYPAINT_BRUSH_SETTING_ERASER, 0.f);
+      b.setBaseValue(MYPAINT_BRUSH_SETTING_LOCK_ALPHA, 0.f);
+      for (int i = 0; i < MYPAINT_BRUSH_INPUTS_COUNT; ++i) {
+        b.setMappingN(MYPAINT_BRUSH_SETTING_ERASER, (MyPaintBrushInput)i, 0);
+        b.setMappingN(MYPAINT_BRUSH_SETTING_LOCK_ALPHA, (MyPaintBrushInput)i, 0);
+      }
+    }
+    TRasterCM32P ras = ti->getRaster();
+    m_mpWork = TRaster32P(ras->getSize());
+    m_mpWork->clear();
+    m_mpBackup = ras->clone();
+    m_mp.reset(new MyPaintToonzBrush(m_mpWork, *m_mpCtl, b, false));
+  } else {
+    // full colour: paints directly with the colour of the current style
+    float h, sat, v;
+    TColorStyle *cs = m_doc->palette()->getStyle(m_doc->currentStyle);
+    rgbToHsv(cs ? cs->getMainColor() : TPixel32::Black, h, sat, v);
+    b.setBaseValue(MYPAINT_BRUSH_SETTING_COLOR_H, h);
+    b.setBaseValue(MYPAINT_BRUSH_SETTING_COLOR_S, sat);
+    b.setBaseValue(MYPAINT_BRUSH_SETTING_COLOR_V, v);
+    m_mp.reset(new MyPaintToonzBrush(TRaster32P(ri->getRaster()), *m_mpCtl, b, false));
+  }
+  m_mp->beginStroke();
+  m_mpTime = secondsNow();
+  m_mpLast = p;
+  m_mp->strokeTo(p, m_s.pressure ? pressure : 0.5, TPointD(), 0.0);
+  return true;
+}
+
+TRect StrokeSession::myPaintTo(const TPointD &p, double pressure, bool last) {
+  m_mpSeg     = TRect();
+  double now  = secondsNow();
+  // real time between events, but never faster than 3000 px/s (events can
+  // arrive in bursts; MyPaint uses the speed as a brush input)
+  double dt   = std::max(now - m_mpTime, tdistance(p, m_mpLast) / 3000.0);
+  dt          = std::max(dt, 0.001);
+  m_mpTime    = now;
+  m_mpLast    = p;
+  m_mp->strokeTo(p, m_s.pressure ? pressure : 0.5, TPointD(), dt);
+  if (last) m_mp->endStroke();
+  TRect r = m_mpSeg;
+  if (!r.isEmpty() && m_mpWork)
+    m_mp->updateDrawing(TToonzImageP(m_img)->getRaster(), m_mpBackup, r,
+                        m_doc->currentStyle, false, m_mpEraser,
+                        MyPaintToonzEraserMode::LinesAndAreas);
+  m_total += r;
+  return r;
+}
+#else
+class StrokeSession::MyPaintCtl {};
+bool myPaintAvailable() { return false; }
+std::shared_ptr<const mypaint::Brush> loadMyPaintBrush(const std::string &) {
+  return nullptr;
+}
+bool StrokeSession::beginMyPaint(const TPointD &, double) { return false; }
+TRect StrokeSession::myPaintTo(const TPointD &, double, bool) { return TRect(); }
+#endif
+
 StrokeSession::StrokeSession(Document *doc, const ToolSettings &s, Tool tool)
     : m_doc(doc), m_s(s), m_tool(tool) {}
 
@@ -200,6 +330,7 @@ TRect StrokeSession::begin(const TPointD &p, double pressure) {
   m_valid = true;
   m_sp         = p;
   m_spPressure = pressure;
+  if (beginMyPaint(p, pressure)) return TRect();
 
   TThickPoint tp(p, std::max(1.0, thickness(pressure)));
   int style = m_doc->currentStyle;
@@ -290,6 +421,7 @@ TThickPoint StrokeSession::smooth(const TPointD &p, double pressure) {
 TRect StrokeSession::move(const TPointD &p, double pressure) {
   if (!m_valid) return TRect();
   TThickPoint tp = smooth(p, pressure);
+  if (m_mp) return myPaintTo(tp, m_spPressure, false);
   if (m_softMode) {
     TRect r    = stampSegment(m_lastSoft, tp, false);
     m_lastSoft = tp;
@@ -443,7 +575,11 @@ TRect StrokeSession::end(const TPointD &p, double pressure) {
   if (m_s.stabilizer > 0)
     for (int i = 0; i < 6 && tdistance(m_sp, p) > 0.5; i++) tail.push_back(smooth(p, pressure));
   tail.push_back(TThickPoint(p, std::max(1.0, thickness(pressure))));
-  if (m_softMode) {
+  if (m_mp) {
+    for (size_t i = 0; i < tail.size(); i++)
+      myPaintTo(tail[i], i + 1 < tail.size() ? m_spPressure : pressure,
+                i + 1 == tail.size());
+  } else if (m_softMode) {
     for (auto &tp : tail) {
       TRect r    = stampSegment(m_lastSoft, tp, false);
       m_lastSoft = tp;
@@ -470,6 +606,10 @@ TRect StrokeSession::end(const TPointD &p, double pressure) {
   m_base   = TRaster32P();
   m_cov    = TRasterGR8P();
   m_backup = TRasterP();
+  m_mp.reset();
+  m_mpCtl.reset();
+  m_mpWork   = TRaster32P();
+  m_mpBackup = TRasterCM32P();
   return m_total;
 }
 

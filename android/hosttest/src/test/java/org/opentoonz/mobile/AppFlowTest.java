@@ -757,6 +757,58 @@ public class AppFlowTest {
         log("desktop .tnz imported into a mobile project and opened in the editor");
     }
 
+    @Test
+    public void t14_myPaintBrushes() throws Exception {
+        assertTrue("engine built with libmypaint", NativeEngine.isMyPaintAvailable());
+        List<String> presets = MyPaintPicker.list(RuntimeEnvironment.application);
+        log("MyPaint presets in the assets: " + presets.size());
+        assertTrue(presets.size() > 200 && presets.contains("classic/charcoal"));
+        File dir = createProject("MyPaint");
+        ActivityController<EditorActivity> c = openEditor(dir);
+        EditorActivity a = c.get();
+        CanvasView canvas = find(a.getWindow().getDecorView(), CanvasView.class).get(0);
+        click(a, "Brush");
+        // pick "classic/charcoal" in the preset grid
+        click(a, "MyPaint brushes");
+        AlertDialog dlg = ShadowAlertDialog.getLatestAlertDialog();
+        android.widget.GridView grid = find(dlg.getWindow().getDecorView(), android.widget.GridView.class).get(0);
+        int pos = -1;
+        for (int i = 0; i < grid.getAdapter().getCount(); i++)
+            if ("classic/charcoal".equals(grid.getAdapter().getItem(i))) pos = i;
+        assertTrue(pos > 0);
+        View cell = grid.getAdapter().getView(pos, null, grid);
+        assertNotNull("preview image", ((android.widget.ImageView) ((ViewGroup) cell).getChildAt(0)).getDrawable());
+        grid.performItemClick(cell, pos, pos);
+        idle();
+        TextView btn = (TextView) byDesc(a, "MyPaint brushes");
+        log("brush button: " + btn.getText());
+        assertTrue(btn.getText().toString().contains("charcoal"));
+        drag(canvas, line(100, 300, 800, 300, 60));
+        Bitmap f = frame(0, false);
+        int touched = 0, partial = 0;
+        for (int x = 120; x < 780; x += 2)
+            for (int y = 280; y < 320; y++) {
+                int g = Color.red(f.getPixel(x, y));
+                if (g < 250) touched++;
+                if (g > 40 && g < 215) partial++;
+            }
+        log("charcoal stroke from the UI: " + touched + " px, " + partial + " partial tones");
+        assertTrue(touched > 300 && partial > touched / 10);
+        // undo, then back to the OpenToonz brush
+        NativeEngine.undo();
+        assertTrue(white(frame(0, false).getPixel(450, 300)));
+        click(a, "MyPaint brushes");
+        dlg = ShadowAlertDialog.getLatestAlertDialog();
+        grid = find(dlg.getWindow().getDecorView(), android.widget.GridView.class).get(0);
+        grid.performItemClick(grid.getAdapter().getView(0, null, grid), 0, 0);
+        idle();
+        assertTrue(((TextView) byDesc(a, "MyPaint brushes")).getText().toString().contains("OpenToonz"));
+        drag(canvas, line(100, 300, 800, 300, 30));
+        assertTrue(dark(frame(0, false).getPixel(450, 300)));
+        saveAndWait(a);
+        c.pause().stop().destroy();
+    }
+
     static void copyDir(File from, File to) throws java.io.IOException {
         to.mkdirs();
         File[] kids = from.listFiles();

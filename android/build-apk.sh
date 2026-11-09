@@ -18,6 +18,8 @@
 #   HOST_MOC          [moc from $QT5_ANDROID/bin or /usr/lib/qt5/bin/moc]  (host binary)
 #   BOOST_INCLUDE     [/usr/include]   header-only boost
 #   KEYSTORE / KEYSTORE_PASS / KEY_ALIAS   release signing (debug: auto keystore)
+#   MYPAINT_SRC       folder filled by tools/fetch-mypaint.sh (libmypaint + json-c);
+#                     unset = APK without MyPaint brushes
 #   SKIP_NATIVE=1     package only Java/resources (APK will not run; CI smoke test)
 set -euo pipefail
 VARIANT=${1:-debug}
@@ -60,7 +62,9 @@ if [ "${SKIP_NATIVE:-0}" != 1 ]; then
     -DQt5_DIR="$QT5_ANDROID/lib/cmake/Qt5" -DQt5Core_DIR="$QT5_ANDROID/lib/cmake/Qt5Core" \
     -DCMAKE_FIND_ROOT_PATH="$QT5_ANDROID" -DOTM_HOST_MOC="$HOST_MOC" \
     -DOTM_BOOST_INCLUDE="${BOOST_INCLUDE:-/usr/include}" \
-    -DANDROID_SDK="$SDK" -DANDROID_SDK_BUILD_TOOLS_REVISION="$(basename "$BUILD_TOOLS")"
+    -DANDROID_SDK="$SDK" -DANDROID_SDK_BUILD_TOOLS_REVISION="$(basename "$BUILD_TOOLS")" \
+    ${MYPAINT_SRC:+-DOTM_MYPAINT_DIR="$MYPAINT_SRC/libmypaint-1.6.0" -DOTM_JSONC_DIR="$MYPAINT_SRC/json-c-json-c-0.17-20230812"}
+  [ -n "${MYPAINT_SRC:-}" ] || echo "warning: MYPAINT_SRC not set, building without MyPaint brushes" >&2
   cmake --build "$OUT/native" --target otmengine lzocompress lzodecompress
   L=$OUT/apk/lib/$ABI
   cp "$OUT/native/libotmengine.so" "$L/"
@@ -90,9 +94,18 @@ fi
 APP=$HERE/app/src/main
 "$AAPT2" compile --dir "$APP/res" -o "$OUT/res/res.zip"
 VERSION_NAME=$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' "$APP/AndroidManifest.xml")
+# assets: the MyPaint brush presets of OpenToonz (CC0), with their previews
+rm -rf "$OUT/assets"; mkdir -p "$OUT/assets/mypaint"
+cp -r "$HERE/../stuff/library/mypaint brushes/." "$OUT/assets/mypaint/"
+if [ -n "${MYPAINT_SRC:-}" ]; then  # licence notices of the bundled libraries
+  mkdir -p "$OUT/assets/licenses"
+  cp "$MYPAINT_SRC/libmypaint-1.6.0/COPYING" "$OUT/assets/licenses/libmypaint-ISC.txt"
+  cp "$MYPAINT_SRC/json-c-json-c-0.17-20230812/COPYING" "$OUT/assets/licenses/json-c-MIT.txt"
+fi
 "$AAPT2" link -I "$ANDROID_JAR" --manifest "$APP/AndroidManifest.xml" \
   --min-sdk-version $MIN_API --target-sdk-version 28 \
-  --java "$OUT/gen" -o "$OUT/base.apk" "$OUT/res/res.zip" --auto-add-overlay
+  --java "$OUT/gen" -o "$OUT/base.apk" "$OUT/res/res.zip" --auto-add-overlay \
+  -A "$OUT/assets"
 
 # ------------------------------------------------------------------ 3. java
 find "$APP/java" "$OUT/gen" -name '*.java' > "$OUT/sources.txt"

@@ -39,6 +39,11 @@ tasks.register('robolectricConfig') {
     doLast {
         def assets = cfgDir.get().dir('assets').asFile
         assets.mkdirs()
+        // MyPaint presets, packaged as APK assets by build-apk.sh
+        project.copy {
+            from "$rootDir/../../stuff/library/mypaint brushes"
+            into new File(assets, 'mypaint')
+        }
         def f = cfgDir.get().file('com/android/tools/test_config.properties').asFile
         f.parentFile.mkdirs()
         // Robolectric 3.8 resolves these relative to the test working directory

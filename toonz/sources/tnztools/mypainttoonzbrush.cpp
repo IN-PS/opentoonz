@@ -6,7 +6,9 @@
 #include "tpixelutils.h"
 #include <toonz/mypainthelpers.hpp>
 
+#ifndef OTM_NO_QTGUI  // OpenToonz Mobile: QtCore only
 #include <QColor>
+#endif
 
 namespace {
 void putOnRasterCM(const TRasterCM32P &out, const TRaster32P &in, int styleId,

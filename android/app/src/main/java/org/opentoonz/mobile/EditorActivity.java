@@ -21,6 +21,7 @@ import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
+import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
@@ -74,6 +75,9 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
     private int mShapeType = NativeEngine.SHAPE_LINE, mEase = NativeEngine.EASE_IN_OUT;
     private boolean mLasso, mCameraTarget, mPivotMode;
     private int mGrain, mScatter;
+    // MyPaint preset ("group/name", null = OpenToonz brush) and size modifier x10
+    private String mMyPaint;
+    private int mMyPaintSize = 0;
     private java.util.List<ProjectAudio> mAudios = new java.util.ArrayList<>();
     private File mPendingExport;
 
@@ -347,12 +351,58 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         mCanvas.setEase(mEase);
         mCanvas.setPivotMode(mPivotMode && mTool == NativeEngine.TOOL_TRANSFORM);
         NativeEngine.setBrushTexture(mGrain, mScatter);
+        applyMyPaint();
+    }
+
+    private void applyMyPaint() {
+        if (mMyPaint == null) {
+            NativeEngine.setMyPaintBrush(null, 0);
+            return;
+        }
+        String json = MyPaintPicker.read(this, mMyPaint);
+        if (json == null || !NativeEngine.setMyPaintBrush(json, mMyPaintSize / 10f)) {
+            Toast.makeText(this, R.string.mypaint_invalid, Toast.LENGTH_SHORT).show();
+            mMyPaint = null;
+            NativeEngine.setMyPaintBrush(null, 0);
+        }
     }
 
     private void buildToolOptions() {
         mToolOptions.removeAllViews();
         switch (mTool) {
             case NativeEngine.TOOL_BRUSH:
+                if (NativeEngine.isMyPaintAvailable()) {
+                    Button mp = new Button(this);
+                    mp.setAllCaps(false);
+                    mp.setText(getString(R.string.mypaint_button, mMyPaint == null
+                            ? getString(R.string.mypaint_off) : MyPaintPicker.displayName(mMyPaint)));
+                    mp.setContentDescription(getString(R.string.mypaint_brushes));
+                    mp.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View v) {
+                            MyPaintPicker.show(EditorActivity.this, mMyPaint, new MyPaintPicker.Listener() {
+                                @Override public void onPicked(String path) {
+                                    mMyPaint = path;
+                                    buildToolOptions();
+                                    applyToolSettings();
+                                }
+                            });
+                        }
+                    });
+                    mToolOptions.addView(mp);
+                }
+                if (mMyPaint != null) {
+                    // MyPaint presets carry their own shape/texture/opacity
+                    addSlider(getString(R.string.mypaint_size), -30, 30, mMyPaintSize, new Ui.IntListener() {
+                        @Override public void onValue(int v) { mMyPaintSize = v; applyToolSettings(); }
+                    });
+                    addSlider(getString(R.string.stabilizer), 0, 10, mStabilizer, new Ui.IntListener() {
+                        @Override public void onValue(int v) { mStabilizer = v; applyToolSettings(); }
+                    });
+                    addCheck(getString(R.string.pressure), mPressure, new CompoundButton.OnCheckedChangeListener() {
+                        @Override public void onCheckedChanged(CompoundButton b, boolean c) { mPressure = c; applyToolSettings(); }
+                    });
+                    break;
+                }
                 addSlider(getString(R.string.size), 1, 100, mBrushMax, new Ui.IntListener() {
                     @Override public void onValue(int v) { mBrushMax = v; applyToolSettings(); }
                 });
