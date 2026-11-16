@@ -127,6 +127,16 @@ public:
   void beginKeyEdit(int layer);
   void setKeyLive(int layer, int row, const Xform &xf, Ease ease);
   void endKeyEdit();
+  // Inverse kinematics (OpenToonz IKEngine) on the parent chain of `layer`:
+  // grab a point of the layer and drag it; the layer and up to maxBones-1
+  // ancestors rotate around their pivots, the top one stays in place.
+  // Coordinates are canvas pixels; keys are created at the current row.
+  bool ikBegin(int layer, double x, double y, int maxBones);
+  void ikDrag(double x, double y);
+  void ikEnd();
+  //! Exports the project as a desktop OpenToonz project folder with a .tnz.
+  bool exportTnz(const std::string &dir, const std::string &sceneName,
+                 std::vector<std::string> *warnings, std::string *error);
   std::vector<int> keyRows(int layer) const;
 
   // layer effects ---------------------------------------------------------
@@ -160,6 +170,9 @@ private:
   DirtyRect fullCanvas() const;
   int m_keyEditLayer = -2;
   KeyMap m_keyEditBefore;
+  std::vector<int> m_ikChain;          // layer uids, top bone first
+  std::vector<KeyMap> m_ikBefore;
+  TPointD m_ikGrabLocal;               // grabbed point in the leaf layer space
   KeyMap *keysOf(int layer) const;
   TAffine curAff() const;
   TPointD toLayer(double x, double y) const;

@@ -699,9 +699,11 @@ static void testKeyframes(Engine &e) {
   CHECK(isDark(render(e, 4).at(200, 150)) && isWhite(render(e, 4).at(100, 150)));
   CHECK(isDark(render(e, 9).at(300, 150)));  // after the last key: holds
   e.setKey(0, 0, a, Ease::EaseInOut);
-  double eased = e.xformAt(0, 2).x;        // smoothstep(0.25) = 0.15625
+  // OpenToonz TDoubleParam "Ease In/Out %" 50/50: 2*t^2 in the first half
+  double eased = e.xformAt(0, 2).x;
   printf("  ease-in-out at 1/4: x=%.2f (linear would be 50)\n", eased);
-  CHECK(std::abs(eased - 31.25) < 1e-6);
+  CHECK(std::abs(eased - 25.0) < 1e-6);
+  CHECK(std::abs(e.xformAt(0, 4).x - 100.0) < 1e-6 && std::abs(e.xformAt(0, 6).x - 175.0) < 1e-6);
   // rotation + scale + opacity
   // rotation 90 deg clockwise around the canvas centre (200,150) + 50%
   // opacity: the horizontal dash at x=90..110 becomes vertical at x=200,
@@ -1144,6 +1146,215 @@ static void testMyPaint(Engine &e) {
   e.settings.myPaint.reset();
 }
 
+
+// Inverse kinematics with the OpenToonz IKEngine on a two-bone arm.
+static void testIk(Engine &e) {
+  section("inverse kinematics (OpenToonz IKEngine on the peg hierarchy)");
+  e.newDocument(400, 300, 12);
+  e.tool = Tool::Brush;
+  e.settings.brushMax = 6;
+  e.settings.pressure = false;
+  e.settings.myPaint.reset();
+  stroke(e, line(100, 150, 200, 150));   // arm: shoulder (100,150) -> elbow (200,150)
+  e.addLayer();
+  stroke(e, line(200, 150, 280, 150));   // forearm: elbow -> hand (280,150)
+  CHECK(e.setParent(1, 0));
+  e.setPivot(0, 100, 150);
+  e.setPivot(1, 200, 150);
+  // grab the hand and pull it to (180, 250): reachable (dist 128 < 180)
+  CHECK(e.ikBegin(1, 280, 150, 8));
+  e.ikDrag(230, 200);
+  e.ikDrag(180, 250);
+  e.ikEnd();
+  Document *d = e.doc();
+  // the hand = forearm point (280,150) (raster y-up: 300-150) through the rig
+  TPointD hand = d->layerWorldAffine(d->layer(1), 0) * TPointD(280, 150);
+  TPointD elbow = d->layerWorldAffine(d->layer(0), 0) * TPointD(200, 150);
+  TPointD shoulder = d->layerWorldAffine(d->layer(0), 0) * TPointD(100, 150);
+  printf("  hand at (%.1f, %.1f) canvas, target (180, 250); elbow (%.1f, %.1f)\n", hand.x,
+         300 - hand.y, elbow.x, 300 - elbow.y);
+  CHECK(tdistance(hand, TPointD(180, 300 - 250)) < 2.0);
+  CHECK(tdistance(shoulder, TPointD(100, 150)) < 1e-6);            // root stays
+  CHECK(std::abs(tdistance(shoulder, elbow) - 100) < 1e-6);         // bone lengths kept
+  CHECK(std::abs(tdistance(elbow, hand) - 80) < 1e-6);
+  CHECK(e.hasKey(0, 0) && e.hasKey(1, 0));
+  Img im = render(e, 0);
+  CHECK(isDark(im.at((int)std::lround(hand.x) - 2 * (hand.x > elbow.x ? 1 : -1), 300 - (int)std::lround(hand.y))) ||
+        isDark(im.at((int)std::lround((hand.x + elbow.x) / 2), 300 - (int)std::lround((hand.y + elbow.y) / 2))));
+  savePng(im, "18_ik.png");
+  // unreachable target: the arm stretches towards it
+  e.setCurrentRow(0);
+  CHECK(e.ikBegin(1, 180, 250, 8));
+  e.ikDrag(100, 500);
+  e.ikEnd();
+  hand = d->layerWorldAffine(d->layer(1), 0) * TPointD(280, 150);
+  printf("  unreachable target: hand at distance %.1f from the shoulder (max 180)\n",
+         tdistance(hand, TPointD(100, 150)));
+  CHECK(tdistance(hand, TPointD(100, 150)) > 170);
+  // one undo per drag
+  e.undo();
+  hand = d->layerWorldAffine(d->layer(1), 0) * TPointD(280, 150);
+  CHECK(tdistance(hand, TPointD(180, 50)) < 2.0);
+  e.undo();
+  CHECK(!e.hasKey(0, 0) && !e.hasKey(1, 0));
+  // single bone: maxBones = 1 rotates only the forearm
+  CHECK(e.ikBegin(1, 280, 150, 1));
+  e.ikDrag(200, 250);
+  e.ikEnd();
+  CHECK(!e.hasKey(0, 0) && e.hasKey(1, 0));
+  CHECK(std::abs(e.xformAt(1, 0).rot - 90) < 0.5);
+}
+
+static std::string affStr(const TAffine &a) {
+  char b[200];
+  snprintf(b, sizeof(b), "%.6f %.6f %.6f %.6f %.6f %.6f", a.a11, a.a12, a.a13, a.a21, a.a22, a.a23);
+  return b;
+}
+
+// Export as a desktop OpenToonz scene, re-import, compare every frame.  The
+// matrices are also written (in desktop stage units) to be checked against
+// the desktop toonzlib (tools/tnzcompat/readscene, docs/RELATORIO.md).
+static void testTnzExport(Engine &e) {
+  section("export .tnz (desktop scene) + re-import");
+  e.newDocument(960, 540, 12);
+  e.tool = Tool::Brush;
+  e.settings.brushMax = 8;
+  e.settings.pressure = false;
+  e.settings.myPaint.reset();
+  stroke(e, line(300, 270, 500, 270));           // body
+  for (int f = 1; f < 12; f++) e.holdFrame();
+  e.setCurrentRow(4);
+  e.duplicateFrame();                            // a 2nd drawing from row 5
+  e.setCurrentRow(0);
+  int v = e.addLayerOfType(2);                   // vector arm, child of the body
+  e.drawShape((int)ShapeType::Rect, 500, 250, 620, 290);
+  int r = e.addLayerOfType(1);                   // raster layer
+  e.doc()->currentStyle = 7;
+  stroke(e, line(100, 100, 200, 100));
+  e.setLayerOpacity(r, 128);
+  CHECK(e.setParent(v, 0));
+  e.setPivot(0, 300, 270);
+  e.setPivot(v, 500, 270);
+  Xform a, b, c;
+  b.x = 120, b.y = -40, b.rot = 30, b.scale = 1.5;
+  c.x = 60, c.rot = -45;
+  e.setKey(0, 0, a, Ease::EaseInOut);
+  e.setKey(0, 6, b, Ease::Linear);
+  e.setKey(0, 11, c, Ease::Constant);
+  Xform el;
+  el.rot = -60;
+  e.setKey(v, 2, Xform(), Ease::Linear);
+  e.setKey(v, 9, el, Ease::EaseInOut);
+  Xform cam0, cam1;
+  cam1.x = 80, cam1.y = 30, cam1.rot = 10, cam1.scale = 2;
+  e.setKey(-1, 0, cam0, Ease::Linear);
+  e.setKey(-1, 10, cam1, Ease::EaseInOut);
+  Document *d = e.doc();
+  const int W = d->width(), H = d->height(), N = d->frameCount();
+  std::vector<int> cells0 = d->layer(0)->cells;
+  std::vector<std::vector<TAffine>> before(N);
+  std::vector<Img> imgs;
+  for (int f = 0; f < N; f++) {
+    for (int i = 0; i < d->layerCount(); i++) before[f].push_back(d->layerAffine(d->layer(i), f));
+    if (f % 5 == 0) imgs.push_back(render(e, f));
+  }
+  // matrices in desktop stage units (camera centred): S(1/k) T(-h) A T(h) S(k)
+  {
+    double k = (W / 16.0) / 53.33333;
+    TAffine toPx = TTranslation(W * 0.5, H * 0.5) * TScale(k);
+    std::ofstream out(g_out + "/tnz_export_matrices.txt");
+    for (int f = 0; f < N; f++)
+      for (int i = 0; i < d->layerCount(); i++)
+        out << f << " " << i << " " << affStr(toPx.inv() * before[f][i] * toPx) << "\n";
+  }
+  std::vector<std::string> warn;
+  std::string err, dir = g_out + "/tnz_export";
+  QDir(QString::fromStdString(dir)).removeRecursively();
+  bool ok = e.exportTnz(dir, "mobile", &warn, &err);
+  if (!ok) printf("  error: %s\n", err.c_str());
+  CHECK(ok);
+  for (auto &w : warn) printf("  export note: %s\n", w.c_str());
+  CHECK(QFile::exists(QString::fromStdString(dir + "/scenes/mobile.tnz")));
+  CHECK(QFile::exists(QString::fromStdString(dir + "/tnz_export_otprj.xml")));
+  std::vector<std::string> iw;
+  ok = e.importTnz(dir + "/scenes/mobile.tnz", &iw, &err);
+  if (!ok) printf("  error: %s\n", err.c_str());
+  for (auto &w : iw) printf("  import note: %s\n", w.c_str());
+  CHECK(ok);
+  if (!ok) return;
+  d = e.doc();
+  CHECK(d->width() == W && d->height() == H && d->fps() == 12 && d->layerCount() == 3);
+  CHECK(d->frameCount() == N);
+  if (d->layerCount() != 3) return;
+  CHECK(d->layer(1)->parentUid == d->layer(0)->uid && d->layer(1)->type == LayerType::Vector);
+  CHECK(d->layer(2)->opacity == 128);
+  CHECK(d->layer(0)->keys.size() == 3 && d->layer(1)->keys.size() == 2);  // not baked
+  bool sameTiming = true;  // same holds / drawing changes
+  for (int f = 1; f < N; f++)
+    sameTiming &= (cells0[f] == cells0[f - 1]) == (d->layer(0)->cell(f) == d->layer(0)->cell(f - 1));
+  CHECK(sameTiming && d->layer(0)->cell(4) != d->layer(0)->cell(5));
+  double worst = 0;
+  for (int f = 0; f < N; f++)
+    for (int i = 0; i < 3; i++) {
+      TAffine x = d->layerAffine(d->layer(i), f), y = before[f][i];
+      worst = std::max({worst, std::abs(x.a11 - y.a11), std::abs(x.a12 - y.a12),
+                        std::abs(x.a21 - y.a21), std::abs(x.a22 - y.a22),
+                        std::abs(x.a13 - y.a13) / 100, std::abs(x.a23 - y.a23) / 100});
+    }
+  printf("  %d frames x 3 layers: worst matrix difference after the round trip = %.2e\n", N, worst);
+  CHECK(worst < 1e-4);
+  int diffPx = 0, k = 0;
+  for (int f = 0; f < N; f += 5, k++) {
+    Img im = render(e, f);
+    for (size_t p = 0; p < im.px.size(); p++)
+      if (std::abs(im.px[p] - imgs[k].px[p]) > 24) diffPx++;
+    if (f == 5) savePng(im, "19_tnz_roundtrip_f5.png");
+  }
+  printf("  rendered frames 0,5,10: %d differing channel values\n", diffPx);
+  CHECK(diffPx < 400);
+}
+
+
+// Scene animated by the desktop toonzlib (tools/tnzcompat/mkscene anim):
+// Peg1 (bezier "speed in/out" x, linear rotation) -> Col1 (ease in/out y,
+// exponential scale, off-centre pivot) -> Col2 (ease %, constant steps);
+// camera pan + zoom + rotation.  The desktop wrote camera^-1 * placement of
+// every column on frames 0..10; the mobile import must give the same.
+static void testTnzAnimImport(Engine &e) {
+  section("desktop .tnz animation import (pegs, hierarchy, all curve types, camera)");
+  std::vector<std::string> warn;
+  std::string err;
+  bool ok = e.importTnz(OTM_TEST_DATA_DIR "/desktop_scene_anim/scenes/otmanim.tnz", &warn, &err);
+  for (auto &w : warn) printf("  note: %s\n", w.c_str());
+  CHECK(ok);
+  if (!ok) return;
+  Document *d = e.doc();
+  CHECK(d->layerCount() >= 2);
+  if (d->layerCount() < 2) return;
+  CHECK(d->layer(1)->parentUid == d->layer(0)->uid);
+  printf("  keys: column 1 = %d, column 2 = %d, camera = %d\n", (int)d->layer(0)->keys.size(),
+         (int)d->layer(1)->keys.size(), (int)d->cameraKeys.size());
+  const int W = d->width(), H = d->height();
+  double k = (W / 16.0) / 53.33333;
+  TAffine toPx = TTranslation(W * 0.5, H * 0.5) * TScale(k);
+  std::ifstream in(OTM_TEST_DATA_DIR "/desktop_scene_anim/scenes/otmanim.tnz.matrices.txt");
+  int f, c, n = 0;
+  double m[6], worst = 0, worstT = 0;
+  while (in >> f >> c >> m[0] >> m[1] >> m[2] >> m[3] >> m[4] >> m[5]) {
+    if (c >= 2) continue;  // column 3 is a .tif level (not supported on mobile)
+    TAffine a = toPx.inv() * d->layerAffine(d->layer(c), f) * toPx;
+    worst  = std::max({worst, std::abs(a.a11 - m[0]), std::abs(a.a12 - m[1]),
+                       std::abs(a.a21 - m[3]), std::abs(a.a22 - m[4])});
+    worstT = std::max({worstT, std::abs(a.a13 - m[2]), std::abs(a.a23 - m[5])});
+    n++;
+  }
+  printf("  %d desktop matrices: worst difference %.2e (rotation/scale), %.4f stage units "
+         "(position)\n", n, worst, worstT);
+  CHECK(n == 22);
+  CHECK(worst < 2e-4 && worstT < 0.05);
+  savePng(render(e, 4), "20_tnz_anim_import_f4.png");
+}
+
 int main(int argc, char **argv) {
   setvbuf(stdout, nullptr, _IONBF, 0);
   QCoreApplication app(argc, argv);
@@ -1171,6 +1382,9 @@ int main(int argc, char **argv) {
   testVector(e);
   testTnzImport(e);
   testMyPaint(e);
+  testIk(e);
+  testTnzExport(e);
+  testTnzAnimImport(e);
   testExport(e);
   testGifQuantizer();
   testMemoryAndPerf(e);

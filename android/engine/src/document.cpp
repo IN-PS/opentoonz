@@ -1,4 +1,5 @@
 #include "document.h"
+#include "curves.h"
 
 #include "timagecache.h"
 #include "trasterimage.h"
@@ -46,12 +47,8 @@ Xform xformAt(const KeyMap &keys, int row) {
   if (hi == keys.begin()) return hi->second.xf;
   auto lo = std::prev(hi);
   if (hi == keys.end()) return lo->second.xf;
-  double t = double(row - lo->first) / double(hi->first - lo->first);
-  switch (lo->second.ease) {
-  case Ease::Constant: t = 0; break;
-  case Ease::EaseInOut: t = t * t * (3 - 2 * t); break;
-  default: break;
-  }
+  // weight computed by the OpenToonz TDoubleParam (see curves.h)
+  double t = easeWeight(lo->second.ease, lo->first, hi->first, row);
   const Xform &a = lo->second.xf, &b = hi->second.xf;
   Xform r;
   r.x       = a.x + (b.x - a.x) * t;

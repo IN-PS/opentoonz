@@ -4,6 +4,8 @@
 #include "projectio.h"
 #include "vector.h"
 #include "tnzimport.h"
+#include "tnzexport.h"
+#include "ik.h"
 #include "tiio_pli.h"
 
 #include "tfiletype.h"
@@ -916,6 +918,96 @@ void Engine::endKeyEdit() {
   int uid   = m_keyEditLayer < 0 ? -1 : m_doc->layer(m_keyEditLayer)->uid;
   if (k) TUndoManager::manager()->add(new KeysUndo(m_doc.get(), uid, m_keyEditBefore, *k));
   m_keyEditLayer = -2;
+}
+
+//-----------------------------------------------------------------------------
+// inverse kinematics
+
+bool Engine::ikBegin(int layer, double x, double y, int maxBones) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  m_ikChain.clear();
+  m_ikBefore.clear();
+  Layer *l = m_doc->layer(layer);
+  if (!l || l->locked) return false;
+  std::vector<Layer *> chain;  // leaf first
+  for (Layer *c = l; c && (int)chain.size() < std::max(1, maxBones);
+       c = c->parentUid ? m_doc->layerByUid(c->parentUid) : nullptr) {
+    if (c->locked) break;
+    chain.push_back(c);
+  }
+  for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+    m_ikChain.push_back((*it)->uid);
+    m_ikBefore.push_back((*it)->keys);
+  }
+  int row       = m_doc->currentRow;
+  TAffine view  = m_doc->layerAffine(nullptr, row);  // camera only
+  TPointD world = view.inv() * toRaster(x, y);
+  m_ikGrabLocal = m_doc->layerWorldAffine(l, row).inv() * world;
+  return true;
+}
+
+void Engine::ikDrag(double x, double y) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  if (m_ikChain.empty()) return;
+  int row = m_doc->currentRow;
+  std::vector<Layer *> bones;
+  for (int uid : m_ikChain)
+    if (Layer *l = m_doc->layerByUid(uid)) bones.push_back(l);
+  if (bones.size() != m_ikChain.size()) return;
+  TPointD target = m_doc->layerAffine(nullptr, row).inv() * toRaster(x, y);
+  // joints = world position of each bone's pivot, then the grabbed point
+  std::vector<TPointD> joints;
+  std::vector<int> boneOfJoint;
+  for (size_t i = 0; i < bones.size(); i++) {
+    Layer *l = bones[i];
+    TPointD c(l->pivotX < 0 ? m_doc->width() * 0.5 : l->pivotX,
+              l->pivotX < 0 ? m_doc->height() * 0.5 : m_doc->height() - l->pivotY);
+    // the pivot is where the layer's own rotation happens: parent frame * (c + offset)
+    Xform f     = otm::xformAt(l->keys, row);
+    Layer *par  = l->parentUid ? m_doc->layerByUid(l->parentUid) : nullptr;
+    TPointD pos = m_doc->layerWorldAffine(par, row) * (c + TPointD(f.x, -f.y));
+    if (!joints.empty() && tdistance(joints.back(), pos) < 0.5) {
+      boneOfJoint.back() = (int)i;  // same joint: the deeper layer rotates
+      continue;
+    }
+    joints.push_back(pos);
+    boneOfJoint.push_back((int)i);
+  }
+  TPointD grab = m_doc->layerWorldAffine(bones.back(), row) * m_ikGrabLocal;
+  if (tdistance(joints.back(), grab) < 0.5) return;  // grabbed exactly on the pivot
+  joints.push_back(grab);
+  std::vector<double> delta = solveIkChain(joints, target);
+  double parentWorld = 0;
+  for (size_t j = 0; j < delta.size(); j++) {
+    Layer *l  = bones[boneOfJoint[j]];
+    Xform f   = otm::xformAt(l->keys, row);
+    Ease ease = Ease::EaseInOut;
+    auto it   = l->keys.find(row);
+    if (it != l->keys.end()) ease = it->second.ease;
+    // canvas rotation is clockwise-positive (see xformAffine)
+    f.rot -= (delta[j] - parentWorld) * 180.0 / M_PI;
+    l->keys[row] = Key{f, ease};
+    parentWorld  = delta[j];
+  }
+  m_doc->dirty = true;
+}
+
+void Engine::ikEnd() {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  if (m_ikChain.empty()) return;
+  TUndoManager::manager()->beginBlock();
+  for (size_t i = 0; i < m_ikChain.size(); i++)
+    if (Layer *l = m_doc->layerByUid(m_ikChain[i]))
+        TUndoManager::manager()->add(new KeysUndo(m_doc.get(), l->uid, m_ikBefore[i], l->keys));
+  TUndoManager::manager()->endBlock();
+  m_ikChain.clear();
+  m_ikBefore.clear();
+}
+
+bool Engine::exportTnz(const std::string &dir, const std::string &sceneName,
+                       std::vector<std::string> *warnings, std::string *error) {
+  std::lock_guard<std::recursive_mutex> lk(m_mutex);
+  return otm::exportTnz(*m_doc, dir, sceneName, warnings, error);
 }
 
 std::vector<int> Engine::keyRows(int layer) const {

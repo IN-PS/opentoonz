@@ -193,6 +193,22 @@ set(TNZCORE_SOURCES
 )
 
 set(TOONZLIB_SOURCES
+  # function curves: the desktop TDoubleParam (keyframe types, expressions)
+  ${OT_COMMON}/tparam/tcubicbezier.cpp
+  ${OT_COMMON}/tparam/tdoublekeyframe.cpp
+  ${OT_COMMON}/tparam/tdoubleparam.cpp
+  ${OT_COMMON}/tparam/tdoubleparamfile.cpp
+  ${OT_COMMON}/tparam/tparam.cpp
+  ${OT_COMMON}/expressions/texpression.cpp
+  ${OT_COMMON}/expressions/tgrammar.cpp
+  ${OT_COMMON}/expressions/tparser.cpp
+  ${OT_COMMON}/expressions/ttokenizer.cpp
+  ${OT_COMMON}/tunit/tunit.cpp
+  # inverse kinematics of the desktop Skeleton tool
+  ${OT_SRC}/toonzlib/ikengine.cpp
+  ${OT_SRC}/toonzlib/ikjacobian.cpp
+  ${OT_SRC}/toonzlib/iknode.cpp
+  ${OT_SRC}/toonzlib/ikskeleton.cpp
   ${OT_SRC}/toonzlib/rasterstrokegenerator.cpp
   ${OT_SRC}/toonzlib/rasterbrush.cpp
   ${OT_SRC}/toonzlib/fill.cpp
@@ -294,6 +310,9 @@ endif()
 # ---------------------------------------------------------------- mobile engine
 add_library(otm_core STATIC
   src/document.cpp
+  src/curves.cpp
+  src/tnzexport.cpp
+  src/ik.cpp
   src/compositor.cpp
   src/tools.cpp
   src/projectio.cpp

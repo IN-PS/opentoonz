@@ -14,6 +14,8 @@
 #include "tsystem.h"
 #include "ttoonzimage.h"
 #include "tvectorimage.h"
+#include "tdoublekeyframe.h"
+#include "tdoubleparam.h"
 #include "tconvert.h"
 
 #include <QDir>
@@ -252,6 +254,103 @@ void remapRegions(TRegion *r, const std::map<int, int> &m) {
 
 }  // namespace
 
+// ---------------------------------------------------------------- pegbars
+// A stage object ("pegbar") of the scene: its channels are real OpenToonz
+// TDoubleParam objects rebuilt from the file (tdoublekeyframe.cpp format),
+// so every desktop interpolation type is evaluated by the original code.
+struct Peg {
+  std::string id, parent;
+  TPointD center, offset;  // inches
+  TDoubleParamP x, y, sx, sy, sc, rot;
+  bool unsupported = false;  // expression / file / path / shear
+  bool has(const TDoubleParamP &p) const { return p && p->getKeyframeCount() > 0; }
+  bool animated() const { return has(x) || has(y) || has(sx) || has(sy) || has(sc) || has(rot); }
+  bool isDefault() const {
+    return !animated() && std::abs(x->getDefaultValue()) < 1e-9 &&
+           std::abs(y->getDefaultValue()) < 1e-9 && std::abs(rot->getDefaultValue()) < 1e-9 &&
+           std::abs(sx->getDefaultValue() - 1) < 1e-9 && std::abs(sy->getDefaultValue() - 1) < 1e-9 &&
+           std::abs(sc->getDefaultValue() - 1) < 1e-9 && norm(center) < 1e-9 && norm(offset) < 1e-9;
+  }
+  // TStageObject::computeLocalPlacement, in pixels (camera centred, y up)
+  TAffine local(double f, double dpi) const {
+    double s = sc->getValue(f);
+    return TTranslation((TPointD(x->getValue(f), y->getValue(f)) + offset) * dpi) *
+           TRotation(rot->getValue(f)) * TScale(s * sx->getValue(f), s * sy->getValue(f)) *
+           TTranslation(-(center * dpi));
+  }
+  void frames(std::set<int> &out) const {
+    for (const TDoubleParamP &p : {x, y, sx, sy, sc, rot})
+      for (int i = 0; i < p->getKeyframeCount(); i++)
+        out.insert((int)std::lround(p->getKeyframe(i).m_frame));
+  }
+  TDoubleKeyframe::Type typeAt(int frame) const {
+    for (const TDoubleParamP &p : {x, y, rot, sc, sx, sy})
+      for (int i = p->getKeyframeCount() - 1; i >= 0; i--)
+        if (p->getKeyframe(i).m_frame <= frame + 1e-6) return p->getKeyframe(i).m_type;
+    return TDoubleKeyframe::Linear;
+  }
+};
+
+TDoubleParamP readChannel(const XNode *n, double def, bool *unsupported) {
+  TDoubleParamP p(new TDoubleParam(def));
+  if (!n) return p;
+  if (const XNode *d = n->child("default")) {
+    auto t = d->tokens();
+    if (!t.empty()) p->setDefaultValue(toDouble(t[0], def));
+  }
+  const XNode *kf = n->child("keyframes");
+  if (!kf) return p;
+  for (const XNode *k : kf->children()) {
+    TDoubleKeyframe key;
+    key.m_isKeyframe = true;
+    auto t = k->tokens();
+    if (const XNode *prev = k->child("prev")) {
+      auto pt = prev->tokens();
+      if (pt.size() > 1) key.m_speedIn.x = toDouble(pt[1]);
+      if (pt.size() > 2) key.m_speedIn.y = toDouble(pt[2]);
+    }
+    if (k->attr.count("lnk") && k->attr.at("lnk") == "no") key.m_linkedHandles = false;
+    if (t.size() < 2) continue;
+    key.m_frame = toDouble(t[0]);
+    key.m_value = toDouble(t[1]);
+    if (k->tag == "L")
+      key.m_type = TDoubleKeyframe::Linear;
+    else if (k->tag == "C")
+      key.m_type = TDoubleKeyframe::Constant;
+    else if (k->tag == "Exp")
+      key.m_type = TDoubleKeyframe::Exponential;
+    else if (k->tag == "S") {
+      key.m_type = TDoubleKeyframe::SpeedInOut;
+      if (t.size() > 3) key.m_speedOut = TPointD(toDouble(t[2]), toDouble(t[3]));
+    } else if (k->tag == "E" || k->tag == "Ep") {
+      key.m_type = k->tag == "E" ? TDoubleKeyframe::EaseInOut
+                                 : TDoubleKeyframe::EaseInOutPercentage;
+      if (t.size() > 2) key.m_speedOut.x = toDouble(t[2]);
+    } else {  // expression, file, similar shape
+      *unsupported = true;
+      continue;
+    }
+    p->setKeyframe(key);
+  }
+  return p;
+}
+
+// T(pos) R(ang) S(s) T(-centre) -> mobile transform about that centre.
+// Returns false when the matrix is not a rotation + uniform scale.
+bool decompose(const TAffine &m, const TPointD &centerPx, Xform &out) {
+  double s1 = std::sqrt(m.a11 * m.a11 + m.a21 * m.a21);
+  double s2 = std::sqrt(m.a12 * m.a12 + m.a22 * m.a22);
+  double det = m.a11 * m.a22 - m.a12 * m.a21;
+  bool ok = det > 0 && std::abs(s1 - s2) < 1e-3 * std::max(1.0, s1) &&
+            std::abs(m.a11 * m.a12 + m.a21 * m.a22) < 1e-3 * std::max(1.0, s1 * s2);
+  TPointD pos = m * centerPx;
+  out.x       = pos.x - centerPx.x;
+  out.y       = -(pos.y - centerPx.y);
+  out.scale   = std::sqrt(std::abs(det));
+  out.rot     = -std::atan2(m.a21, m.a11) * 180.0 / M_PI;
+  return ok;
+}
+
 // ---------------------------------------------------------------- import
 TnzImportResult importTnz(const std::string &tnzPath) {
   TnzImportResult res;
@@ -420,6 +519,7 @@ TnzImportResult importTnz(const std::string &tnzPath) {
   const XNode *xsh  = tnz->child("xsheet");
   const XNode *cols = xsh ? xsh->child("columns") : nullptr;
   int colIndex      = 0;
+  std::map<int, std::vector<int>> colLayers;  // column number (1-based) -> layer uids
   if (cols)
     for (const XNode *col : cols->children()) {
       colIndex++;
@@ -463,6 +563,7 @@ TnzImportResult importTnz(const std::string &tnzPath) {
         }
         if (!loadLevel(lit->second)) continue;
         Layer *l   = doc->addLayer(levelType[cl.first], lit->second.name);
+        colLayers[colIndex].push_back(l->uid);
         l->visible = (status & 0x1) == 0;  // eCamstandVisible bit set = hidden
         l->locked  = (status & 0x8) != 0;
         l->opacity = opacity;
@@ -472,10 +573,164 @@ TnzImportResult importTnz(const std::string &tnzPath) {
       }
     }
   if (xsh && xsh->child("pegbars")) {
-    bool animated = false;
-    for (const XNode *p : xsh->child("pegbars")->children())
-      if (p->child("keyframes") || p->child("keyframe")) animated = true;
-    if (animated) res.warnings.push_back("pegbar/camera animation is not imported");
+    std::map<std::string, Peg> pegs;
+    std::string cameraId;
+    for (const XNode *p : xsh->child("pegbars")->children("pegbar")) {
+      Peg g;
+      g.id = p->attr.count("id") ? p->attr.at("id") : "";
+      if (p->attr.count("activeboth") || p->attr.count("active")) cameraId = g.id;
+      if (const XNode *par = p->child("parent")) {
+        g.parent = par->attr.count("id") ? par->attr.at("id") : "None";
+        for (const char *h : {"handle", "parentHandle"})
+          if (par->attr.count(h) && par->attr.at(h) != "B" && !par->attr.at(h).empty())
+            g.unsupported = true;
+      }
+      if (const XNode *c = p->child("center")) {
+        auto t = c->tokens();
+        if (t.size() >= 4) {
+          g.center = TPointD(toDouble(t[0]), toDouble(t[1]));
+          g.offset = TPointD(-toDouble(t[2]), -toDouble(t[3]));  // saved negated
+        }
+      }
+      if (const XNode *st = p->child("status")) {
+        auto t = st->tokens();
+        if (!t.empty() && (toInt(t[0]) & 0x3) != 0) g.unsupported = true;  // motion path / IK
+      }
+      g.x   = readChannel(p->child("x"), 0, &g.unsupported);
+      g.y   = readChannel(p->child("y"), 0, &g.unsupported);
+      g.sx  = readChannel(p->child("sx"), 1, &g.unsupported);
+      g.sy  = readChannel(p->child("sy"), 1, &g.unsupported);
+      g.sc  = readChannel(p->child("sc"), 1, &g.unsupported);
+      g.rot = readChannel(p->child("rot"), 0, &g.unsupported);
+      for (const char *ch : {"shx", "shy", "plasticSD"})
+        if (p->child(ch)) g.unsupported = true;
+      pegs[g.id] = g;
+    }
+    auto isCol = [](const std::string &id) { return id.compare(0, 3, "Col") == 0; };
+    // chain of an object up to (excluding) its nearest column ancestor
+    auto chainOf = [&](const std::string &id, std::string *colParent) {
+      std::vector<const Peg *> chain;  // object first
+      std::string cur = id;
+      for (int depth = 0; depth < 64 && pegs.count(cur); depth++) {
+        const Peg &g = pegs[cur];
+        chain.push_back(&g);
+        if (isCol(g.parent)) {
+          if (colParent) *colParent = g.parent;
+          break;
+        }
+        cur = g.parent;
+      }
+      return chain;
+    };
+    // Builds mobile keys for a chain; pivot = centre of the object itself.
+    auto buildKeys = [&](const std::vector<const Peg *> &chain, const std::string &what,
+                         bool camera, KeyMap &keys, TPointD &centerPx) {
+      const Peg &own = *chain[0];
+      centerPx       = own.center * camDpi;
+      bool unsupported = false, extra = false;
+      std::set<int> fr;
+      for (size_t i = 0; i < chain.size(); i++) {
+        if (chain[i]->unsupported) unsupported = true;
+        if (i > 0 && !chain[i]->isDefault()) extra = true;
+        chain[i]->frames(fr);
+      }
+      if (unsupported)
+        res.warnings.push_back(what + ": expressions, motion paths, shear or handles are not "
+                                      "imported (animation may differ)");
+      bool allDefault = true;
+      for (auto *g : chain)
+        if (!g->isDefault()) allDefault = false;
+      if (allDefault) return;
+      auto at = [&](double f) {
+        TAffine m;
+        for (auto *g : chain) m = g->local(f, camDpi) * m;
+        return m;
+      };
+      auto toXform = [&](double f, Xform &xf) {
+        bool ok = decompose(at(f), camera ? TPointD() : centerPx, xf);
+        if (!extra && !camera) {  // keep the channel values (no angle wrapping)
+          xf.rot   = -own.rot->getValue(f);
+          xf.scale = own.sc->getValue(f) * own.sx->getValue(f);
+        } else if (!extra && camera)
+          xf.rot = -own.rot->getValue(f);
+        if (camera) xf.scale = xf.scale > 1e-6 ? 1.0 / xf.scale : 1.0;  // stored as zoom
+        return ok;
+      };
+      bool similarity = true;
+      if (fr.empty()) fr.insert(0);
+      // 1st attempt: one mobile key per desktop keyframe ...
+      KeyMap simple;
+      for (int f : fr) {
+        Key k;
+        similarity &= toXform(f, k.xf);
+        TDoubleKeyframe::Type t = own.typeAt(f);
+        k.ease = t == TDoubleKeyframe::Constant ? Ease::Constant
+                 : t == TDoubleKeyframe::Linear ? Ease::Linear
+                                                : Ease::EaseInOut;
+        simple[std::max(0, f)] = k;
+      }
+      // ... kept only if it reproduces the desktop curves on every frame
+      bool exact = true;
+      int f0 = *fr.begin(), f1 = *fr.rbegin();
+      for (int f = std::max(0, f0); f <= f1 && exact; f++) {
+        Xform want, got = xformAt(simple, f);
+        similarity &= toXform(f, want);
+        if (std::abs(want.x - got.x) > 0.02 || std::abs(want.y - got.y) > 0.02 ||
+            std::abs(want.rot - got.rot) > 0.005 ||
+            std::abs(want.scale - got.scale) > 1e-4 * std::max(1.0, want.scale))
+          exact = false;
+      }
+      if (exact)
+        keys = simple;
+      else {  // baked: one linear key per frame
+        keys.clear();
+        double prevRot = 0;
+        bool first     = true;
+        for (int f = std::max(0, f0); f <= f1; f++) {
+          Key k;
+          toXform(f, k.xf);
+          if (!first)  // unwrap atan2 so that in-between frames do not spin
+            while (k.xf.rot - prevRot > 180) k.xf.rot -= 360;
+          if (!first)
+            while (k.xf.rot - prevRot < -180) k.xf.rot += 360;
+          prevRot = k.xf.rot;
+          first   = false;
+          k.ease  = Ease::Linear;
+          keys[f] = k;
+        }
+      }
+      if (!similarity)
+        res.warnings.push_back(what + ": non-uniform scale is imported as uniform");
+    };
+    for (auto &cl : colLayers) {
+      std::string id = "Col" + std::to_string(cl.first);
+      if (!pegs.count(id)) continue;
+      std::string colParent;
+      auto chain = chainOf(id, &colParent);
+      KeyMap keys;
+      TPointD c;
+      buildKeys(chain, "column " + std::to_string(cl.first), false, keys, c);
+      int parentUid = 0;
+      if (!colParent.empty()) {
+        int pc = toInt(colParent.substr(3));
+        if (colLayers.count(pc) && !colLayers[pc].empty()) parentUid = colLayers[pc][0];
+      }
+      for (int uid : cl.second) {
+        Layer *l = doc->layerByUid(uid);
+        if (!l) continue;
+        l->keys      = keys;
+        l->parentUid = parentUid;
+        if (!keys.empty() && norm(c) > 1e-6) {
+          l->pivotX = W * 0.5 + c.x;
+          l->pivotY = H * 0.5 - c.y;
+        }
+      }
+    }
+    if (!cameraId.empty() && pegs.count(cameraId)) {
+      auto chain = chainOf(cameraId, nullptr);
+      TPointD c;
+      buildKeys(chain, "camera", true, doc->cameraKeys, c);
+    }
   }
   if (xsh && xsh->child("fxnodes") && !xsh->child("fxnodes")->children().empty())
     res.warnings.push_back("FX schematic nodes are not imported");

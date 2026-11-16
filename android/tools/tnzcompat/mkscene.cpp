@@ -1,6 +1,8 @@
 // Compatibility tool: creates a REAL OpenToonz scene with the desktop
 // toonzlib (built from this repository), used to test the mobile .tnz import.
-//   mkscene <output-scene.tnz>
+//   mkscene <output-scene.tnz> [anim]
+// "anim" adds peg / column / camera animation with every curve type and
+// writes <scene>.matrices.txt (camera^-1 * column placement per frame).
 // Scene: camera 1920x1080 (16x9 in), 12 fps;
 //   column 1: Toonz Raster level "A" (frames 1,1,2,3,3 -> holds)
 //   column 2: vector level "B" (2 frames; frame 2 has a filled region)
@@ -25,6 +27,11 @@
 #include "toonz/toonzscene.h"
 #include "toonz/tproject.h"
 #include "toonz/txsheet.h"
+#include "toonz/tstageobject.h"
+#include "toonz/tstageobjecttree.h"
+#include "tdoubleparam.h"
+#include "tdoublekeyframe.h"
+#include <fstream>
 #include "toonz/txshcell.h"
 #include "toonz/txshcolumn.h"
 #include "toonz/txshleveltypes.h"
@@ -38,6 +45,64 @@ static void hline(const TRasterCM32P &r, int x0, int x1, int y, int w, int ink) 
   for (int yy = y - w / 2; yy <= y + w / 2; yy++)
     for (int x = x0; x <= x1; x++)
       if (yy >= 0 && yy < r->getLy()) r->pixels(yy)[x] = TPixelCM32(ink, 0, 0);
+}
+
+
+// ---- "anim" variant: stage object animation with every desktop curve type
+static void key(TStageObject *o, TStageObject::Channel ch, double frame, double value,
+                TDoubleKeyframe::Type type, TPointD speedIn = TPointD(),
+                TPointD speedOut = TPointD()) {
+  TDoubleKeyframe k;
+  k.m_frame = frame, k.m_value = value, k.m_type = type, k.m_isKeyframe = true;
+  k.m_speedIn = speedIn, k.m_speedOut = speedOut;
+  o->getParam(ch)->setKeyframe(k);
+}
+
+static void addAnimation(TXsheet *xsh) {
+  TStageObjectTree *tree = xsh->getStageObjectTree();
+  TStageObject *peg  = tree->getStageObject(TStageObjectId::PegbarId(0));
+  TStageObject *col1 = tree->getStageObject(TStageObjectId::ColumnId(0));
+  TStageObject *col2 = tree->getStageObject(TStageObjectId::ColumnId(1));
+  TStageObject *cam  = tree->getStageObject(tree->getCurrentCameraId());
+  // Peg1: speed in/out (bezier) on x, linear rotation
+  key(peg, TStageObject::T_X, 0, 0, TDoubleKeyframe::SpeedInOut, TPointD(), TPointD(4, 0.2));
+  key(peg, TStageObject::T_X, 10, 3, TDoubleKeyframe::Linear, TPointD(-3, 0));
+  key(peg, TStageObject::T_Angle, 0, 0, TDoubleKeyframe::Linear);
+  key(peg, TStageObject::T_Angle, 10, 40, TDoubleKeyframe::Linear);
+  // Col1 on Peg1: ease in/out (frames) on y, exponential scale, off-centre pivot
+  col1->setParent(peg->getId());
+  col1->setCenter(0, TPointD(1, 0.5));
+  key(col1, TStageObject::T_Y, 2, 0, TDoubleKeyframe::EaseInOut, TPointD(), TPointD(2, 0));
+  key(col1, TStageObject::T_Y, 8, -2, TDoubleKeyframe::Linear, TPointD(-3, 0));
+  key(col1, TStageObject::T_Scale, 0, 1, TDoubleKeyframe::Exponential);
+  key(col1, TStageObject::T_Scale, 10, 2, TDoubleKeyframe::Linear);
+  // Col2 child of Col1: ease in/out (%), constant x step
+  col2->setParent(col1->getId());
+  key(col2, TStageObject::T_Angle, 0, 0, TDoubleKeyframe::EaseInOutPercentage, TPointD(),
+      TPointD(30, 0));
+  key(col2, TStageObject::T_Angle, 10, -90, TDoubleKeyframe::Linear, TPointD(-20, 0));
+  key(col2, TStageObject::T_X, 0, 0.5, TDoubleKeyframe::Constant);
+  key(col2, TStageObject::T_X, 5, 2, TDoubleKeyframe::Constant);
+  // camera: pan, zoom (scale) and rotation
+  key(cam, TStageObject::T_X, 0, 0, TDoubleKeyframe::Linear);
+  key(cam, TStageObject::T_X, 10, 1, TDoubleKeyframe::Linear);
+  key(cam, TStageObject::T_Scale, 0, 1, TDoubleKeyframe::Linear);
+  key(cam, TStageObject::T_Scale, 10, 1.5, TDoubleKeyframe::Linear);
+  key(cam, TStageObject::T_Angle, 0, 0, TDoubleKeyframe::Linear);
+  key(cam, TStageObject::T_Angle, 10, 15, TDoubleKeyframe::Linear);
+}
+
+// view matrix of each column on each frame: camera^-1 * column placement
+static void dumpMatrices(TXsheet *xsh, int frames, const std::string &path) {
+  std::ofstream out(path);
+  char b[256];
+  for (int f = 0; f < frames; f++)
+    for (int c = 0; c < xsh->getColumnCount(); c++) {
+      TAffine a = xsh->getCameraAff(f).inv() * xsh->getPlacement(TStageObjectId::ColumnId(c), f);
+      snprintf(b, sizeof(b), "%d %d %.6f %.6f %.6f %.6f %.6f %.6f\n", f, c, a.a11, a.a12, a.a13,
+               a.a21, a.a22, a.a23);
+      out << b;
+    }
 }
 
 int main(int argc, char **argv) {
@@ -129,6 +194,10 @@ int main(int argc, char **argv) {
   xsh->setCell(0, 2, TXshCell(c, TFrameId(1)));
   xsh->getColumn(2)->setCamstandVisible(false);
 
+  if (argc > 2 && std::string(argv[2]) == "anim") {
+    addAnimation(xsh);
+    dumpMatrices(xsh, 11, std::string(argv[1]) + ".matrices.txt");
+  }
   for (TXshSimpleLevel *l : {a, b, c}) {  // frames set in memory: force save
     l->setDirtyFlag(true);
   }
