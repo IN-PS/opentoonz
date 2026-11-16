@@ -19,8 +19,9 @@ import android.widget.TextView;
 final class Ui {
     private Ui() {}
 
-    static final int BG = 0xFF1B1E27, PANEL = 0xFF262A36, PANEL2 = 0xFF2F3442,
-            ACCENT = 0xFFF5C342, TEXT = 0xFFE8EAF0, DIM = 0xFF8A90A0;
+    // colours of the OpenToonz desktop "Default" (dark) theme
+    static final int BG = 0xFF303030, PANEL = 0xFF484848, PANEL2 = 0xFF5F5F5F, BAR = 0xFF3D3D3D,
+            ACCENT = 0xFF5B9BD5, TEXT = 0xFFE6E6E6, DIM = 0xFFA0A0A0;
 
     static int dp(Context c, float v) {
         return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v,

@@ -216,7 +216,7 @@ public class AppFlowTest {
         log("canvas view " + canvas.getWidth() + "x" + canvas.getHeight() + ", document " + W + "x" + H);
 
         // brush stroke (finger) on frame 1
-        click(a, "Brush");
+        click(a, "Brush Tool");
         drag(canvas, line(100, 200, 400, 200, 30));
         assertTrue("stroke pixel", dark(frame(0, false).getPixel(250, 200)));
         assertTrue(NativeEngine.getCell(0, 0) > 0);
@@ -262,7 +262,7 @@ public class AppFlowTest {
         // fill inside a closed circle
         NativeEngine.setCurrentStyle(7);  // blue
         drag(canvas, circle(650, 250, 60, 48));
-        click(a, "Fill");
+        click(a, "Fill Tool");
         drag(canvas, new float[][]{{650, 250}, {650, 250}});
         int blue = frame(2, false).getPixel(650, 250);
         log(String.format("fill pixel = #%08X", blue));
@@ -276,7 +276,7 @@ public class AppFlowTest {
         log("fill + undo/redo OK");
 
         // selection: drag a rect around the red line top, move it, apply
-        click(a, "Selection");
+        click(a, "Selection Tool");
         drag(canvas, line(230, 90, 270, 160, 10));
         assertTrue(NativeEngine.hasSelection());
         drag(canvas, line(250, 120, 450, 120, 10));    // move by +200 x
@@ -496,14 +496,14 @@ public class AppFlowTest {
         EditorActivity a = c.get();
         CanvasView canvas = find(a.getWindow().getDecorView(), CanvasView.class).get(0);
         // shape tool: rectangle
-        click(a, "Shapes");
+        click(a, "Geometric Tool");
         select(spinner(a, 0), NativeEngine.SHAPE_RECT);
         drag(canvas, line(100, 100, 300, 250, 10));
         Bitmap f = frame(0, false);
         assertTrue(dark(f.getPixel(200, 100)) && dark(f.getPixel(300, 175)) && white(f.getPixel(200, 175)));
         log("shape tool: rectangle drawn");
         // lasso around the top-left corner, then move it
-        click(a, "Selection");
+        click(a, "Selection Tool");
         select(spinner(a, 0), 1);
         drag(canvas, new float[][]{{90, 90}, {160, 90}, {90, 160}, {90, 90}});
         assertTrue("lasso active", NativeEngine.hasSelection());
@@ -526,7 +526,7 @@ public class AppFlowTest {
         drag(canvas, line(100, 270, 140, 270, 10));             // a dash
         for (int i = 0; i < 9; i++) click(a, "Hold (extend) frame");
         assertEquals(10, NativeEngine.getFrameCount());
-        click(a, "Animate (keyframes)");
+        click(a, "Animate Tool");
         NativeEngine.setCurrentRow(0);
         canvas.showRow(0);
         drag(canvas, line(500, 300, 500, 300, 2));               // tap: key at frame 1
@@ -638,13 +638,13 @@ public class AppFlowTest {
         int v = NativeEngine.getCurrentLayer();
         assertEquals(NativeEngine.LAYER_VECTOR, NativeEngine.getLayerType(v));
         click(a, "Layers");
-        click(a, "Brush");
+        click(a, "Brush Tool");
         drag(canvas, line(100, 100, 500, 100, 30));
         assertTrue("vector stroke rendered", dark(frame(0, false).getPixel(300, 100)));
-        click(a, "Shapes");
+        click(a, "Geometric Tool");
         select(spinner(a, 0), NativeEngine.SHAPE_ELLIPSE);
         drag(canvas, line(200, 200, 500, 450, 10));
-        click(a, "Fill");
+        click(a, "Fill Tool");
         NativeEngine.setCurrentStyle(7);
         drag(canvas, new float[][]{{350, 325}, {350, 325}});
         int fillPx = frame(0, false).getPixel(350, 325);
@@ -667,7 +667,7 @@ public class AppFlowTest {
         assertTrue(NativeEngine.getParent(0) == v);
         // textured brush on the toonz raster layer
         click(a, "Layers");
-        click(a, "Brush");
+        click(a, "Brush Tool");
         NativeEngine.setBrush(20, 20, false, true);
         NativeEngine.setBrushTexture(90, 0);
         NativeEngine.setKey(v, 0, new float[]{0, 0, 0, 1, 1}, NativeEngine.EASE_LINEAR);
@@ -767,7 +767,7 @@ public class AppFlowTest {
         ActivityController<EditorActivity> c = openEditor(dir);
         EditorActivity a = c.get();
         CanvasView canvas = find(a.getWindow().getDecorView(), CanvasView.class).get(0);
-        click(a, "Brush");
+        click(a, "Brush Tool");
         // pick "classic/charcoal" in the preset grid
         click(a, "MyPaint brushes");
         AlertDialog dlg = ShadowAlertDialog.getLatestAlertDialog();
@@ -806,6 +806,113 @@ public class AppFlowTest {
         drag(canvas, line(100, 300, 800, 300, 30));
         assertTrue(dark(frame(0, false).getPixel(450, 300)));
         saveAndWait(a);
+        c.pause().stop().destroy();
+    }
+
+    @Test
+    public void t15_roomsXsheetSkeletonAndTnzExport() throws Exception {
+        File dir = createProject("Desk");
+        ActivityController<EditorActivity> c = openEditor(dir);
+        final EditorActivity a = c.get();
+        CanvasView canvas = find(a.getWindow().getDecorView(), CanvasView.class).get(0);
+        TimelineView tl = find(a.getWindow().getDecorView(), TimelineView.class).get(0);
+        XsheetView xs = find(a.getWindow().getDecorView(), XsheetView.class).get(0);
+        // arm: column 1 (shoulder 300,270 -> elbow 500,270), forearm: column 2
+        click(a, "Brush Tool");
+        drag(canvas, line(300, 270, 500, 270, 20));
+        for (int i = 0; i < 5; i++) click(a, "Hold (extend) frame");
+        NativeEngine.setCurrentRow(0);
+        click(a, "Layers");
+        click(a, "Add Toonz Raster layer");
+        click(a, "Layers");
+        drag(canvas, line(500, 270, 640, 270, 20));
+        assertTrue(NativeEngine.setParent(1, 0));
+        NativeEngine.setPivot(0, 300, 270);
+        NativeEngine.setPivot(1, 500, 270);
+
+        // ---- rooms: Animation (timeline) is the default
+        assertEquals(EditorActivity.ROOM_ANIMATION, a.room());
+        assertEquals(View.VISIBLE, tl.getVisibility());
+        assertEquals(View.GONE, xs.getVisibility());
+        click(a, "room Xsheet");
+        layoutWindow(a, 900, 560);
+        assertEquals(View.VISIBLE, xs.getVisibility());
+        assertEquals(View.GONE, tl.getVisibility());
+        log("Xsheet room: xsheet " + xs.getWidth() + "x" + xs.getHeight() + ", viewer " + canvas.getWidth()
+                + "x" + canvas.getHeight());
+        assertTrue(xs.getWidth() > 200 && canvas.getWidth() > xs.getWidth());
+        assertEquals(NativeEngine.getCell(0, 3), xs.cellAt(0, 3));
+        // tap the cell of column 1, frame 4
+        float d = a.getResources().getDisplayMetrics().density;
+        xs.tap(40 * d + 10, 46 * d + 3 * 22 * d + 5);
+        idle();
+        assertEquals(3, NativeEngine.getCurrentRow());
+        assertEquals(0, NativeEngine.getCurrentLayer());
+        // column header: camstand toggle of column 2
+        xs.tap(40 * d + 66 * d + 8, 46 * d * 0.8f);
+        idle();
+        assertTrue(!NativeEngine.isLayerVisible(1));
+        xs.tap(40 * d + 66 * d + 8, 46 * d * 0.8f);
+        idle();
+        assertTrue(NativeEngine.isLayerVisible(1));
+        // run the drawing code once (Robolectric has no real pixels to look at)
+        xs.draw(new android.graphics.Canvas(Bitmap.createBitmap(xs.getWidth(), xs.getHeight(),
+                Bitmap.Config.ARGB_8888)));
+        // Drawing room: Level Palette
+        click(a, "room Drawing");
+        layoutWindow(a, 900, 560);
+        assertEquals(View.GONE, xs.getVisibility());
+        click(a, "palette style 7");
+        assertEquals(7, NativeEngine.getCurrentStyle());
+        click(a, "room Animation");
+        layoutWindow(a, 900, 560);
+        assertEquals(View.VISIBLE, tl.getVisibility());
+
+        // ---- Skeleton tool: drag the hand, both bones rotate (IK)
+        NativeEngine.setCurrentRow(0);
+        NativeEngine.setCurrentLayer(1);
+        click(a, "Skeleton Tool");
+        canvas.showRow(0);
+        drag(canvas, line(640, 270, 480, 440, 12));
+        assertTrue(NativeEngine.hasKey(0, 0) && NativeEngine.hasKey(1, 0));
+        float[] elbow = NativeEngine.getJoint(1, 0), shoulder = NativeEngine.getJoint(0, 0);
+        log(String.format("IK from the UI: elbow at (%.0f, %.0f), shoulder (%.0f, %.0f)", elbow[0], elbow[1],
+                shoulder[0], shoulder[1]));
+        assertTrue(Math.abs(shoulder[0] - 300) < 0.5 && Math.abs(shoulder[1] - 270) < 0.5);
+        assertTrue(Math.abs(Math.hypot(elbow[0] - 300, elbow[1] - 270) - 200) < 0.5);
+        assertTrue("forearm reaches the target", dark(frame(0, false).getPixel(482, 436))
+                || dark(frame(0, false).getPixel(484, 432)) || dark(frame(0, false).getPixel(486, 428)));
+        NativeEngine.undo();
+        assertTrue(!NativeEngine.hasKey(0, 0) && !NativeEngine.hasKey(1, 0));
+        NativeEngine.redo();
+
+        // ---- export as a desktop OpenToonz scene (zip of a project folder)
+        menu(a, 6);
+        waitFor("tnz export", () -> {
+            Intent n = shadowOf(a).peekNextStartedActivityForResult() == null ? null
+                    : shadowOf(a).peekNextStartedActivityForResult().intent;
+            return n != null && Intent.ACTION_CREATE_DOCUMENT.equals(n.getAction());
+        });
+        Intent create = shadowOf(a).getNextStartedActivityForResult().intent;
+        assertEquals("application/zip", create.getType());
+        File zip = new File(a.getCacheDir(), "Desk_opentoonz.zip");
+        List<String> names = new ArrayList<>();
+        try (java.util.zip.ZipInputStream zi = new java.util.zip.ZipInputStream(new java.io.FileInputStream(zip))) {
+            for (java.util.zip.ZipEntry e; (e = zi.getNextEntry()) != null; ) names.add(e.getName());
+        }
+        log("exported " + zip.getName() + " (" + zip.length() + " bytes): " + names);
+        assertTrue(names.contains("Desk/scenes/Desk.tnz") && names.contains("Desk/Desk_otprj.xml"));
+        int tlv = 0;
+        for (String n : names) if (n.endsWith(".tlv")) tlv++;
+        assertEquals(2, tlv);
+        // the exported scene opens again with the same rig and keys
+        File scene = new File(a.getCacheDir(), "tnzexport/Desk/scenes/Desk.tnz");
+        float[] before = NativeEngine.getXform(1, 0);
+        assertNull(NativeEngine.importTnz(scene.getAbsolutePath()));
+        assertEquals(2, NativeEngine.getLayerCount());
+        assertEquals(0, NativeEngine.getParent(1));
+        float[] after = NativeEngine.getXform(1, 0);
+        assertTrue(Math.abs(before[2] - after[2]) < 1e-3);
         c.pause().stop().destroy();
     }
 

@@ -634,7 +634,28 @@ JF(jboolean, setMyPaintBrush)(JNIEnv *env, jclass, jstring json, jfloat size) {
 JF(jboolean, isMyPaintAvailable)(JNIEnv *, jclass) {
   return myPaintAvailable() ? JNI_TRUE : JNI_FALSE;
 }
+// Inverse kinematics (OpenToonz IKEngine)
+JF(jboolean, ikBegin)(JNIEnv *, jclass, jint layer, jfloat x, jfloat y, jint maxBones) {
+  return E().ikBegin(layer, x, y, maxBones) ? JNI_TRUE : JNI_FALSE;
+}
+JF(void, ikDrag)(JNIEnv *, jclass, jfloat x, jfloat y) { E().ikDrag(x, y); }
+JF(void, ikEnd)(JNIEnv *, jclass) { E().ikEnd(); }
+JF(jfloatArray, getJoint)(JNIEnv *env, jclass, jint layer, jint row) {
+  std::lock_guard<std::recursive_mutex> lk(E().mutex());
+  TPointD p   = E().jointCanvasPos(layer, row);
+  jfloat v[2] = {(jfloat)p.x, (jfloat)p.y};
+  jfloatArray a = env->NewFloatArray(2);
+  env->SetFloatArrayRegion(a, 0, 2, v);
+  return a;
+}
 static std::vector<std::string> g_importWarnings;
+// Exports a desktop OpenToonz project folder; notes via getImportWarnings().
+JF(jstring, exportTnz)(JNIEnv *env, jclass, jstring dir, jstring name) {
+  std::string err;
+  g_importWarnings.clear();
+  bool ok = E().exportTnz(str(env, dir), str(env, name), &g_importWarnings, &err);
+  return ok ? nullptr : env->NewStringUTF(err.c_str());
+}
 JF(jstring, importTnz)(JNIEnv *env, jclass, jstring path) {
   std::string err;
   bool ok = E().importTnz(str(env, path), &g_importWarnings, &err);

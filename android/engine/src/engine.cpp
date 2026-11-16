@@ -1004,6 +1004,17 @@ void Engine::ikEnd() {
   m_ikBefore.clear();
 }
 
+TPointD Engine::jointCanvasPos(int layer, int row) const {
+  Layer *l = m_doc->layer(layer);
+  if (!l) return TPointD();
+  TPointD c(l->pivotX < 0 ? m_doc->width() * 0.5 : l->pivotX,
+            l->pivotX < 0 ? m_doc->height() * 0.5 : m_doc->height() - l->pivotY);
+  Xform f    = otm::xformAt(l->keys, row);
+  Layer *par = l->parentUid ? m_doc->layerByUid(l->parentUid) : nullptr;
+  TPointD p  = m_doc->layerAffine(par, row) * (c + TPointD(f.x, -f.y));
+  return TPointD(p.x, m_doc->height() - p.y);
+}
+
 bool Engine::exportTnz(const std::string &dir, const std::string &sceneName,
                        std::vector<std::string> *warnings, std::string *error) {
   std::lock_guard<std::recursive_mutex> lk(m_mutex);

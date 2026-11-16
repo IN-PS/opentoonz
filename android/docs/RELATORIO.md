@@ -1,7 +1,7 @@
 # OpenToonz Mobile — Relatório de funcionalidades, testes e pendências
 
-**Estado (honesto):** APKs debug e release **gerados** (v0.4.0, motor 233/233, app na JVM 14/14, arm64-v8a,
-`android/releases/v0.4.0/`), assinados e verificados (apksigner v2/v3), com
+**Estado (honesto):** APKs debug e release **gerados** (v0.5.0, motor 267/267, app na JVM 15/15, arm64-v8a,
+`android/releases/v0.5.0/`), assinados e verificados (apksigner v2/v3), com
 todas as dependências nativas resolvidas. **Ainda não foram instalados nem
 executados num aparelho ARM64** — o port só pode ser considerado concluído
 após esse teste. Ver §4.
@@ -50,7 +50,34 @@ físico, exportação de sequência PNG, interface em português e inglês.
 | Caneta digital | pressão (`getPressure`), `TOOL_TYPE_STYLUS/ERASER`, cursor em *hover*, rejeição de palma (após detectar caneta, dedos só navegam) |
 | Horizontal e vertical | `configChanges` tratados; layout em blocos que se adapta às duas orientações |
 
-## 0. Versão 0.4.0 — pincéis MyPaint
+## 0. Versão 0.5.0 — interface no formato do desktop, curvas, IK, cena .tnz completa
+
+* **Interface:** salas (Desenho / Animação / Xsheet), Xsheet vertical com as
+  cores do tema `Default` do desktop (`stuff/config/qss/Default`), Paleta do
+  Nível, barra de ferramentas na ordem e nomes do desktop, ferramenta
+  Esqueleto; app fixo em paisagem.
+* **Curvas:** `common/tparam` (`TDoubleParam`, `TDoubleKeyframe`),
+  `common/expressions` e `common/tunit` compilados no motor; as chaves do app
+  são avaliadas por esse código (`engine/src/curves.cpp`).
+* **IK:** `toonzlib/ikengine.cpp`, `ikjacobian.cpp`, `iknode.cpp`,
+  `ikskeleton.cpp` compilados; a ferramenta Esqueleto resolve a cadeia de
+  pais com o `IKEngine` (`engine/src/ik.cpp`).
+* **Exportar `.tnz`** (`engine/src/tnzexport.cpp`): pasta de projeto do
+  desktop. **Verificado com o toonzlib do desktop**
+  (`tools/tnzcompat/readscene`): a cena carrega, os níveis são lidos do
+  disco, e `câmera⁻¹ × posição da coluna` é idêntica à do app em 39/39
+  matrizes (13 quadros × 3 colunas, com hierarquia, pivôs, ease e câmera).
+* **Importar animação do desktop** (`tnzimport.cpp`): canais reconstruídos
+  como `TDoubleParam`; quando as chaves do app não reproduzem a curva, ela é
+  gravada quadro a quadro. Verificado com `mkscene anim` (cena criada pelo
+  desktop com Peg1 → Col1 → Col2, câmera, curvas speed in/out, ease, ease %,
+  exponencial, constante): 22/22 matrizes, erro máximo 4,9e-7.
+* Testes: motor **267/267**, app na JVM **15/15**.
+* **Limites da verificação:** nenhum aparelho ARM64; o Robolectric não
+  desenha pixels, então a aparência da interface nova (Xsheet, salas) não
+  foi vista — só layout, toques e estado.
+
+## 0-. Versão 0.4.0 — pincéis MyPaint
 
 * **libmypaint 1.6.0 + json-c 0.17** compilados no motor (fontes do arquivo
   do Ubuntu com SHA-256 verificado, `tools/fetch-mypaint.sh`), com o
@@ -178,17 +205,17 @@ oficial (`android/docs/COMPILACAO.md`).
 
 ## 5. Recursos do OpenToonz ainda incompatíveis / não portados
 
-* Cena `.tnz`: importação parcial (ver §0); FX do schematic, pegs e curvas
-  do desktop, sub-xsheets e colunas de som não são importados; o app não
-  grava `.tnz` (grava `.tlv`/`.tpl`/`.pli`/`.png` compatíveis).
+* Cena `.tnz`: FX do schematic, expressões, caminhos de movimento,
+  sub-xsheets e colunas de som não são importados; na exportação ficam de
+  fora efeitos por camada, keys de opacidade e som.
 * Ferramentas vetoriais avançadas (Geometric com todos os modos, *tape*,
   *inbetween* vetorial, *control point editor*).
 * Editor de pincéis MyPaint e pincéis personalizados (os presets MyPaint
   funcionam desde a v0.4.0, sem edição dos parâmetros).
 * Sistema de FX completo (`tnzbase`, `stdfx`, `colorfx`), schematic, render
   farm — a v0.3.0 tem um conjunto próprio de efeitos por camada.
-* Curvas de função e expressões do `TStageObject`; **esqueleto com IK** e
-  deformação *plastic* (`tnzext`, SuperLU/BLAS) — há hierarquia + pivô (FK).
+* Editor de curvas de função e expressões na interface (o motor já usa o
+  `TDoubleParam`); deformação *plastic* (`tnzext`, SuperLU/BLAS).
 * Lip-sync automático, stop motion, cleanup/scanner.
 * Outros formatos: TIFF, PSD, TGA, BMP, SVG, WebM/AVI/APNG (ffmpeg).
 * Régua, grade/guia de câmera.

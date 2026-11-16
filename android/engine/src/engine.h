@@ -134,6 +134,8 @@ public:
   bool ikBegin(int layer, double x, double y, int maxBones);
   void ikDrag(double x, double y);
   void ikEnd();
+  //! Canvas position of a layer's pivot (its joint) at a row, camera included.
+  TPointD jointCanvasPos(int layer, int row) const;
   //! Exports the project as a desktop OpenToonz project folder with a .tnz.
   bool exportTnz(const std::string &dir, const std::string &sceneName,
                  std::vector<std::string> *warnings, std::string *error);

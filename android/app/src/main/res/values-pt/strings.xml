@@ -13,11 +13,11 @@
     <string name="fps">Quadros por segundo</string>
     <string name="no_projects">Nenhum projeto ainda. Toque em + para criar.</string>
     <string name="delete_confirm">Excluir o projeto \"%1$s\"? Isto não pode ser desfeito.</string>
-    <string name="brush">Pincel</string>
-    <string name="eraser">Borracha</string>
-    <string name="fill">Preenchimento</string>
-    <string name="select">Seleção</string>
-    <string name="picker">Conta-gotas de estilo</string>
+    <string name="brush">Ferramenta Pincel</string>
+    <string name="eraser">Ferramenta Borracha</string>
+    <string name="fill">Ferramenta Preenchimento</string>
+    <string name="select">Ferramenta Seleção</string>
+    <string name="picker">Ferramenta Seletor de Estilo</string>
     <string name="onion">Onion Skin</string>
     <string name="play">Reproduzir</string>
     <string name="layers">Camadas</string>
@@ -68,8 +68,8 @@
     <string name="value">Brilho</string>
     <string name="stylus_mode">Caneta detectada: os dedos agora apenas movem/ampliam</string>
     <string name="about_text">OpenToonz Mobile — motor construído a partir do núcleo C++ do OpenToonz (tnzcore, toonzlib, codec TLV).\nMemória em uso: %1$d MB\nTela: %2$d×%3$d a %4$d fps</string>
-    <string name="shape">Formas</string>
-    <string name="transform">Animar (keyframes)</string>
+    <string name="shape">Ferramenta Geométrica</string>
+    <string name="transform">Ferramenta Animar</string>
     <string name="line">Linha</string>
     <string name="rectangle">Retângulo</string>
     <string name="ellipse">Elipse</string>
@@ -125,4 +125,13 @@
     <string name="mypaint_button">Pincel: %1$s</string>
     <string name="mypaint_size">Tamanho MyPaint</string>
     <string name="mypaint_invalid">Não foi possível carregar este pincel</string>
+    <string name="skeleton">Ferramenta Esqueleto</string>
+    <string name="room_drawing">Desenho</string>
+    <string name="room_animation">Animação</string>
+    <string name="room_xsheet">Xsheet</string>
+    <string name="level_palette">Paleta do Nível</string>
+    <string name="ik_all">Cadeia inteira</string>
+    <string name="ik_hint">Arraste uma parte da coluna atual: os pais giram para acompanhar (IK)</string>
+    <string name="export_tnz">Exportar cena OpenToonz (.tnz)</string>
+    <string name="export_notes">Exportado. Observações:</string>
 </resources>

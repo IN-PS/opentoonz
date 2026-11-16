@@ -33,7 +33,9 @@ public class CanvasView extends View {
 
     private static final int NONE = 0, DRAW_PENDING = 1, DRAWING = 2, NAVIGATE = 3,
             SELECT_RECT = 4, SEL_MOVE = 5, SEL_GESTURE = 6, SHAPE_DRAG = 7, LASSO = 8,
-            XF_MOVE = 9, XF_GESTURE = 10;
+            XF_MOVE = 9, XF_GESTURE = 10, IK_DRAG = 11;
+    private int mIkBones = 8;
+    public void setIkBones(int n) { mIkBones = n; }
 
     // tool modes set by the editor
     private int mShapeType = NativeEngine.SHAPE_LINE;
@@ -106,7 +108,7 @@ public class CanvasView extends View {
             selectionDone();
         }
         mTool = tool;
-        NativeEngine.setTool(tool);
+        NativeEngine.setTool(tool == NativeEngine.TOOL_SKELETON ? NativeEngine.TOOL_TRANSFORM : tool);
         invalidate();
     }
 
@@ -211,6 +213,26 @@ public class CanvasView extends View {
             int[] b = NativeEngine.selectionBounds();
             if (b[2] >= b[0]) c.drawRect(b[0], b[1], b[2] + 1, b[3] + 1, mSelPaint);
         }
+        if (mTool == NativeEngine.TOOL_SKELETON) {  // bones: parent joint -> child joint
+            android.graphics.Paint bp = new android.graphics.Paint(Paint.ANTI_ALIAS_FLAG);
+            float rr = Ui.dp(getContext(), 6) / viewScale();
+            int n = NativeEngine.getLayerCount(), cur = NativeEngine.getCurrentLayer();
+            for (int l = 0; l < n; l++) {
+                int par = NativeEngine.getParent(l);
+                float[] j = NativeEngine.getJoint(l, mRow);
+                bp.setColor(l == cur ? 0xFFFF5252 : 0xFF2D8CFF);
+                if (par >= 0) {
+                    float[] pj = NativeEngine.getJoint(par, mRow);
+                    bp.setStyle(Paint.Style.STROKE);
+                    bp.setStrokeWidth(lw * 2.5f);
+                    c.drawLine(pj[0], pj[1], j[0], j[1], bp);
+                }
+                if (par >= 0 || l == cur) {
+                    bp.setStyle(Paint.Style.FILL);
+                    c.drawCircle(j[0], j[1], rr, bp);
+                }
+            }
+        }
         if (mTool == NativeEngine.TOOL_TRANSFORM && !mCameraTarget) {  // pivot marker
             float[] pv = NativeEngine.getPivot(NativeEngine.getCurrentLayer());
             android.graphics.Paint pp = new android.graphics.Paint(Paint.ANTI_ALIAS_FLAG);
@@ -291,6 +313,7 @@ public class CanvasView extends View {
             case MotionEvent.ACTION_UP: onUp(e); break;
             case MotionEvent.ACTION_CANCEL:
                 if (mState == XF_MOVE || mState == XF_GESTURE) NativeEngine.endKeyEdit();
+                if (mState == IK_DRAG) NativeEngine.ikEnd();
                 if (mState == DRAWING) {
                     float[] p = toDoc(e.getX(), e.getY());
                     renderDirty(NativeEngine.pointerUp(p[0], p[1], 1f));
@@ -324,7 +347,13 @@ public class CanvasView extends View {
             mShY0 = mShY1 = p[1];
             return;
         }
-        if (mTool == NativeEngine.TOOL_TRANSFORM && mPivotMode && !mCameraTarget) {
+        if (mTool == NativeEngine.TOOL_SKELETON && !mPivotMode) {
+            // grab the current column and drag it: the parent chain follows (IK)
+            if (NativeEngine.ikBegin(NativeEngine.getCurrentLayer(), p[0], p[1], mIkBones)) mState = IK_DRAG;
+            return;
+        }
+        if ((mTool == NativeEngine.TOOL_TRANSFORM || mTool == NativeEngine.TOOL_SKELETON)
+                && mPivotMode && !mCameraTarget) {
             NativeEngine.setPivot(NativeEngine.getCurrentLayer(), p[0], p[1]);
             mState = NONE;
             renderAll();
@@ -438,6 +467,12 @@ public class CanvasView extends View {
                     mLassoPts.add(toDoc(e.getHistoricalX(0, h), e.getHistoricalY(0, h)));
                 mLassoPts.add(toDoc(e.getX(), e.getY()));
                 invalidate();
+                break;
+            }
+            case IK_DRAG: {
+                float[] p = toDoc(e.getX(), e.getY());
+                NativeEngine.ikDrag(p[0], p[1]);
+                renderAll();
                 break;
             }
             case XF_MOVE: {
@@ -554,7 +589,14 @@ public class CanvasView extends View {
 
     private void onUp(MotionEvent e) {
         // the release position is the final position of a selection drag
-        if (mState == SEL_MOVE || mState == XF_MOVE) onMove(e);
+        if (mState == SEL_MOVE || mState == XF_MOVE || mState == IK_DRAG) onMove(e);
+        if (mState == IK_DRAG) {
+            NativeEngine.ikEnd();
+            mState = NONE;
+            renderAll();
+            changed();
+            return;
+        }
         float[] p = toDoc(e.getX(), e.getY());
         boolean tap = Math.hypot(e.getX() - mDownX, e.getY() - mDownY) <= mSlop * 2;
         switch (mState) {

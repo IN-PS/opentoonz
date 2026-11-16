@@ -47,10 +47,12 @@ import java.util.concurrent.Executors;
 
 /** The animation editor. */
 public class EditorActivity extends Activity implements CanvasView.Listener,
-        TimelineView.Listener, LayerPanel.Listener {
+        TimelineView.Listener, LayerPanel.Listener, XsheetView.Listener {
     static final String EXTRA_DIR = "dir", EXTRA_NEW = "new";
     private static final int REQ_IMPORT = 1, REQ_IMPORT_SEQ = 2, REQ_SAVE_GIF = 3, REQ_SAVE_MP4 = 4,
-            REQ_IMPORT_AUDIO = 5;
+            REQ_IMPORT_AUDIO = 5, REQ_SAVE_TNZ = 6;
+    /** Rooms, as in the desktop workspace: each one arranges the panels for a task. */
+    static final int ROOM_DRAWING = 0, ROOM_ANIMATION = 1, ROOM_XSHEET = 2;
     private static final long AUTOSAVE_MS = 30_000;
 
     private File mDir;
@@ -58,7 +60,13 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
     private TimelineView mTimeline;
     private LayerPanel mLayers;
     private LinearLayout mSwatches, mToolOptions, mSelBar;
-    private ImageButton[] mToolButtons = new ImageButton[7];
+    private ImageButton[] mToolButtons = new ImageButton[8];
+    private XsheetView mXsheet;
+    private LinearLayout mPalettePanel, mPaletteList;
+    private View mFrameBar;
+    private TextView[] mRoomTabs = new TextView[3];
+    private int mRoom = ROOM_ANIMATION;
+    private int mIkBones = 8;
     private ImageButton mOnionBtn, mPlayBtn, mLayersBtn;
     private TextView mStatus, mFrameLabel;
     private final ExecutorService mIo = Executors.newSingleThreadExecutor();
@@ -142,6 +150,18 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         mStatus.setTextColor(Ui.DIM);
         mStatus.setPadding(Ui.dp(this, 8), 0, Ui.dp(this, 8), 0);
         top.addView(mStatus);
+        int[] roomNames = {R.string.room_drawing, R.string.room_animation, R.string.room_xsheet};
+        for (int i = 0; i < 3; i++) {
+            final int room = i;
+            TextView t = Ui.label(this, getString(roomNames[i]), 13);
+            t.setPadding(Ui.dp(this, 10), Ui.dp(this, 8), Ui.dp(this, 10), Ui.dp(this, 8));
+            t.setContentDescription("room " + getString(roomNames[i]));
+            t.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { setRoom(room); }
+            });
+            mRoomTabs[i] = t;
+            top.addView(t);
+        }
         ImageButton undo = Ui.iconButton(this, R.drawable.ic_undo, getString(R.string.undo), 44);
         undo.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { doUndo(); }
@@ -185,7 +205,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
 
         // tool options -----------------------------------------------------
         HorizontalScrollView optScroll = new HorizontalScrollView(this);
-        optScroll.setBackgroundColor(0xFF22252F);
+        optScroll.setBackgroundColor(Ui.BAR);
         mToolOptions = new LinearLayout(this);
         mToolOptions.setGravity(Gravity.CENTER_VERTICAL);
         mToolOptions.setPadding(Ui.dp(this, 8), 0, Ui.dp(this, 8), 0);
@@ -202,17 +222,23 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         tools.setOrientation(LinearLayout.VERTICAL);
         tools.setPadding(Ui.dp(this, 2), Ui.dp(this, 4), Ui.dp(this, 2), Ui.dp(this, 4));
         int[] icons = {R.drawable.ic_brush, R.drawable.ic_eraser, R.drawable.ic_fill,
-                R.drawable.ic_select, R.drawable.ic_picker, R.drawable.ic_shape, R.drawable.ic_transform};
+                R.drawable.ic_select, R.drawable.ic_picker, R.drawable.ic_shape, R.drawable.ic_transform,
+                R.drawable.ic_skeleton};
         int[] names = {R.string.brush, R.string.eraser, R.string.fill, R.string.select, R.string.picker,
-                R.string.shape, R.string.transform};
+                R.string.shape, R.string.transform, R.string.skeleton};
         for (int i = 0; i < icons.length; i++) {
             final int tool = i;
             mToolButtons[i] = Ui.iconButton(this, icons[i], getString(names[i]), 50);
             mToolButtons[i].setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { selectTool(tool); }
             });
-            tools.addView(mToolButtons[i]);
         }
+        // same order as the desktop toolbar: Animate, Selection, Brush,
+        // Geometric, Fill, Eraser, Style Picker, Skeleton
+        for (int t : new int[]{NativeEngine.TOOL_TRANSFORM, NativeEngine.TOOL_SELECT, NativeEngine.TOOL_BRUSH,
+                NativeEngine.TOOL_SHAPE, NativeEngine.TOOL_FILL, NativeEngine.TOOL_ERASER,
+                NativeEngine.TOOL_PICKER, NativeEngine.TOOL_SKELETON})
+            tools.addView(mToolButtons[t]);
         tools.addView(Ui.spacer(this, 10));
         mOnionBtn = Ui.iconButton(this, R.drawable.ic_onion, getString(R.string.onion), 50);
         mOnionBtn.setOnClickListener(new View.OnClickListener() {
@@ -227,7 +253,28 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
                 ViewGroup.LayoutParams.MATCH_PARENT));
         mCanvas = new CanvasView(this);
         mCanvas.setListener(this);
-        work.addView(mCanvas, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+        work.addView(mCanvas, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.25f));
+        // Xsheet room: the exposure sheet on the right of the viewer
+        mXsheet = new XsheetView(this);
+        mXsheet.setListener(this);
+        mXsheet.setVisibility(View.GONE);
+        work.addView(mXsheet, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+        // Drawing room: the Level Palette on the right of the viewer
+        mPalettePanel = new LinearLayout(this);
+        mPalettePanel.setOrientation(LinearLayout.VERTICAL);
+        mPalettePanel.setBackgroundColor(Ui.PANEL);
+        TextView pt = Ui.label(this, getString(R.string.level_palette), 12);
+        pt.setTextColor(Ui.DIM);
+        pt.setPadding(Ui.dp(this, 8), Ui.dp(this, 6), Ui.dp(this, 8), Ui.dp(this, 4));
+        mPalettePanel.addView(pt);
+        ScrollView ps = new ScrollView(this);
+        mPaletteList = new LinearLayout(this);
+        mPaletteList.setOrientation(LinearLayout.VERTICAL);
+        ps.addView(mPaletteList);
+        mPalettePanel.addView(ps, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        mPalettePanel.setVisibility(View.GONE);
+        work.addView(mPalettePanel, new LinearLayout.LayoutParams(Ui.dp(this, 150),
+                ViewGroup.LayoutParams.MATCH_PARENT));
         middle.addView(work);
 
         mLayers = new LayerPanel(this);
@@ -265,7 +312,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
 
         // frame bar -------------------------------------------------------
         HorizontalScrollView fbScroll = new HorizontalScrollView(this);
-        fbScroll.setBackgroundColor(0xFF22252F);
+        fbScroll.setBackgroundColor(Ui.BAR);
         LinearLayout fb = new LinearLayout(this);
         fb.setGravity(Gravity.CENTER_VERTICAL);
         ImageButton prev = Ui.iconButton(this, R.drawable.ic_prev, "previous", 44);
@@ -309,13 +356,32 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         fb.addView(timing);
         fbScroll.addView(fb);
         root.addView(fbScroll);
+        mFrameBar = fbScroll;
 
         mTimeline = new TimelineView(this);
         mTimeline.setListener(this);
         root.addView(mTimeline, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(root);
+        setRoom(mRoom);
     }
+
+    /** Arranges the panels like the desktop rooms. */
+    void setRoom(int room) {
+        mRoom = room;
+        for (int i = 0; i < 3; i++) {
+            mRoomTabs[i].setTextColor(i == room ? 0xFFFFFFFF : Ui.DIM);
+            mRoomTabs[i].setBackgroundColor(i == room ? Ui.PANEL2 : 0);
+        }
+        mTimeline.setVisibility(room == ROOM_ANIMATION ? View.VISIBLE : View.GONE);
+        mXsheet.setVisibility(room == ROOM_XSHEET ? View.VISIBLE : View.GONE);
+        mPalettePanel.setVisibility(room == ROOM_DRAWING ? View.VISIBLE : View.GONE);
+        if (mLoaded) refreshAll();
+    }
+
+    int room() { return mRoom; }
+
+    @Override public void onColumnChanged() { refreshAll(); }
 
     private void addFrameButton(LinearLayout bar, int icon, int name, final Runnable op) {
         ImageButton b = Ui.iconButton(this, icon, getString(name), 44);
@@ -349,7 +415,9 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         mCanvas.setLasso(mLasso);
         mCanvas.setCameraTarget(mCameraTarget);
         mCanvas.setEase(mEase);
-        mCanvas.setPivotMode(mPivotMode && mTool == NativeEngine.TOOL_TRANSFORM);
+        mCanvas.setPivotMode(mPivotMode && (mTool == NativeEngine.TOOL_TRANSFORM
+                || mTool == NativeEngine.TOOL_SKELETON));
+        mCanvas.setIkBones(mIkBones);
         NativeEngine.setBrushTexture(mGrain, mScatter);
         applyMyPaint();
     }
@@ -504,6 +572,18 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
                 hint.setTextColor(Ui.DIM);
                 mToolOptions.addView(hint);
                 break;
+            case NativeEngine.TOOL_SKELETON:
+                addSpinner(new String[]{getString(R.string.ik_all), "1", "2", "3", "4"},
+                        mIkBones >= 8 ? 0 : mIkBones, new Ui.IntListener() {
+                    @Override public void onValue(int v) { mIkBones = v == 0 ? 8 : v; applyToolSettings(); }
+                });
+                addCheck(getString(R.string.set_pivot), mPivotMode, new CompoundButton.OnCheckedChangeListener() {
+                    @Override public void onCheckedChanged(CompoundButton b, boolean c) { mPivotMode = c; applyToolSettings(); }
+                });
+                TextView ikHint = Ui.label(this, getString(R.string.ik_hint), 12);
+                ikHint.setTextColor(Ui.DIM);
+                mToolOptions.addView(ikHint);
+                break;
             default:
                 mToolOptions.addView(Ui.label(this, getString(R.string.picker), 13));
         }
@@ -541,6 +621,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         int row = NativeEngine.getCurrentRow();
         mCanvas.showRow(row);
         mTimeline.refresh();
+        mXsheet.refresh();
         if (mLayers.getVisibility() == View.VISIBLE) mLayers.refresh();
         refreshSwatches();
         updateFrameLabel(row);
@@ -552,6 +633,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
 
     private void refreshSwatches() {
         mSwatches.removeAllViews();
+        mPaletteList.removeAllViews();
         int[] ids = NativeEngine.getStyleIds();
         int[] colors = NativeEngine.getStyleColors();
         int cur = NativeEngine.getCurrentStyle();
@@ -559,22 +641,13 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         for (int i = 0; i < ids.length; i++) {
             final int id = ids[i];
             final int color = colors[i];
-            View v = new View(this);
-            android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
-            g.setColor(color | 0xFF000000);
-            g.setCornerRadius(Ui.dp(this, 6));
-            g.setStroke(Ui.dp(this, id == cur ? 3 : 1), id == cur ? Ui.ACCENT : 0xFF555A68);
-            v.setBackground(g);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(s, s);
-            lp.setMargins(m, m, m, m);
-            v.setContentDescription("style " + id);
-            v.setOnClickListener(new View.OnClickListener() {
+            View.OnClickListener pick = new View.OnClickListener() {
                 @Override public void onClick(View x) {
                     NativeEngine.setCurrentStyle(id);
                     refreshSwatches();
                 }
-            });
-            v.setOnLongClickListener(new View.OnLongClickListener() {
+            };
+            View.OnLongClickListener edit = new View.OnLongClickListener() {
                 @Override public boolean onLongClick(View x) {
                     ColorPickerDialog.show(EditorActivity.this, getString(R.string.edit_color), color,
                             new ColorPickerDialog.Callback() {
@@ -586,9 +659,38 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
                             });
                     return true;
                 }
-            });
+            };
+            View v = styleChip(color, id == cur);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(s, s);
+            lp.setMargins(m, m, m, m);
+            v.setContentDescription("style " + id);
+            v.setOnClickListener(pick);
+            v.setOnLongClickListener(edit);
             mSwatches.addView(v, lp);
+            // Level Palette row (Drawing room): chip + style name, like desktop
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(Ui.dp(this, 6), 0, Ui.dp(this, 6), 0);
+            if (id == cur) row.setBackgroundColor(Ui.PANEL2);
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(s, s);
+            cp.setMargins(m, m, Ui.dp(this, 8), m);
+            row.addView(styleChip(color, id == cur), cp);
+            row.addView(Ui.label(this, "color_" + id, 12));
+            row.setContentDescription("palette style " + id);
+            row.setOnClickListener(pick);
+            row.setOnLongClickListener(edit);
+            mPaletteList.addView(row);
         }
+    }
+
+    private View styleChip(int color, boolean current) {
+        View v = new View(this);
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setColor(color | 0xFF000000);
+        g.setCornerRadius(Ui.dp(this, 4));
+        g.setStroke(Ui.dp(this, current ? 3 : 1), current ? 0xFFFFFFFF : 0xFF1A1A1A);
+        v.setBackground(g);
+        return v;
     }
 
     private void gotoRow(int row) {
@@ -596,6 +698,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         row = Math.max(0, row);
         NativeEngine.setCurrentRow(row);
         mCanvas.showRow(row);
+        mXsheet.refresh();
         mTimeline.refresh();
         updateFrameLabel(row);
         for (ProjectAudio a : mAudios) a.scrub(row, NativeEngine.getFps(), mUi);  // lip-sync scrub
@@ -604,6 +707,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
     // ------------------------------------------------------------------ listeners
     @Override public void onDocumentChanged() {
         mTimeline.refresh();
+        mXsheet.refresh();
         updateFrameLabel(NativeEngine.getCurrentRow());
     }
 
@@ -636,6 +740,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
 
     @Override public void onLayersChanged() {
         mCanvas.renderAll();
+        mXsheet.refresh();
         mTimeline.refresh();
     }
 
@@ -689,6 +794,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
                 for (ProjectAudio a : mAudios) { a.pause(); a.play(0, NativeEngine.getFps()); }
             mCanvas.showRow(mPlayRow);
             mTimeline.setCurrentRow(mPlayRow);
+            mXsheet.setCurrentRow(mPlayRow);
             updateFrameLabel(mPlayRow);
             mUi.postDelayed(this, 1000 / Math.max(1, NativeEngine.getFps()));
         }
@@ -730,7 +836,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
     // ------------------------------------------------------------------ menu
     private void showMenu(View anchor) {
         final int[] ids = {R.string.save, R.string.import_images, R.string.import_sequence,
-                R.string.export_gif, R.string.export_mp4, R.string.export_png,
+                R.string.export_gif, R.string.export_mp4, R.string.export_png, R.string.export_tnz,
                 R.string.onion_settings, R.string.scene_settings, R.string.import_audio,
                 R.string.audio_settings, R.string.memory_info};
         String[] items = new String[ids.length];
@@ -744,6 +850,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
                     case R.string.export_gif: exportGif(); break;
                     case R.string.export_mp4: exportMp4(); break;
                     case R.string.export_png: exportPng(); break;
+                    case R.string.export_tnz: exportTnz(); break;
                     case R.string.onion_settings: onionSettings(); break;
                     case R.string.scene_settings: sceneSettings(); break;
                     case R.string.memory_info: about(); break;
@@ -925,6 +1032,56 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
         });
     }
 
+    /** Desktop OpenToonz project folder (scene .tnz + levels), zipped. */
+    private void exportTnz() {
+        final String name = mDir.getName().replaceAll("[^A-Za-z0-9_-]", "_");
+        runExport(new File(getCacheDir(), name + "_opentoonz.zip"), "application/zip", REQ_SAVE_TNZ, new ExportJob() {
+            @Override public String run(File out, ProgressDialog pd) {
+                File dir = new File(getCacheDir(), "tnzexport/" + name);
+                ProjectStore.deleteRecursive(dir.getParentFile());
+                dir.mkdirs();
+                String err = NativeEngine.exportTnz(dir.getAbsolutePath(), name);
+                if (err != null) return err;
+                try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(
+                        new java.io.FileOutputStream(out))) {
+                    zipDir(zip, dir, name + "/");
+                } catch (java.io.IOException e) {
+                    return e.toString();
+                }
+                final String[] notes = NativeEngine.getImportWarnings();
+                if (notes.length > 0) mUi.post(new Runnable() {
+                    @Override public void run() {
+                        StringBuilder sb = new StringBuilder(getString(R.string.export_notes));
+                        for (String n : notes) sb.append("\n\u2022 ").append(n);
+                        Toast.makeText(EditorActivity.this, sb.toString(), Toast.LENGTH_LONG).show();
+                    }
+                });
+                return null;
+            }
+        });
+    }
+
+    static void zipDir(java.util.zip.ZipOutputStream zip, File dir, String prefix) throws java.io.IOException {
+        File[] kids = dir.listFiles();
+        if (kids == null) return;
+        java.util.Arrays.sort(kids);
+        for (File k : kids) {
+            if (k.isDirectory()) {
+                zip.putNextEntry(new java.util.zip.ZipEntry(prefix + k.getName() + "/"));
+                zip.closeEntry();
+                zipDir(zip, k, prefix + k.getName() + "/");
+            } else {
+                zip.putNextEntry(new java.util.zip.ZipEntry(prefix + k.getName()));
+                try (InputStream in = new FileInputStream(k)) {
+                    byte[] buf = new byte[1 << 16];
+                    int n;
+                    while ((n = in.read(buf)) > 0) zip.write(buf, 0, n);
+                }
+                zip.closeEntry();
+            }
+        }
+    }
+
     private void exportPng() {
         final File dir = new File(getExternalFilesDir("exports"), mDir.getName() + "_png");
         final ProgressDialog pd = ProgressDialog.show(this, null, getString(R.string.exporting), true, false);
@@ -1009,7 +1166,7 @@ public class EditorActivity extends Activity implements CanvasView.Listener,
             } else importUris(uris, false);
         } else if (req == REQ_IMPORT_AUDIO) {
             importAudio(data.getData());
-        } else if ((req == REQ_SAVE_GIF || req == REQ_SAVE_MP4) && mPendingExport != null) {
+        } else if ((req == REQ_SAVE_GIF || req == REQ_SAVE_MP4 || req == REQ_SAVE_TNZ) && mPendingExport != null) {
             copyTo(mPendingExport, data.getData());
         }
     }

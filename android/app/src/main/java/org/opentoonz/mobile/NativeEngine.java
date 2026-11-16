@@ -160,4 +160,15 @@ public final class NativeEngine {
     /** json = .myb preset contents, null = OpenToonz brush; size = log2 modifier -3..3. */
     public static native boolean setMyPaintBrush(String json, float size);
     public static native boolean isMyPaintAvailable();
+
+    // v0.5: skeleton (OpenToonz IKEngine), desktop scene export
+    /** Java-side tool id: drags a rig with inverse kinematics. */
+    public static final int TOOL_SKELETON = 7;
+    public static native boolean ikBegin(int layer, float x, float y, int maxBones);
+    public static native void ikDrag(float x, float y);
+    public static native void ikEnd();
+    /** Canvas position {x, y} of the layer's pivot (joint) at a row. */
+    public static native float[] getJoint(int layer, int row);
+    /** Writes a desktop OpenToonz project folder (scenes/name.tnz ...); null = ok. */
+    public static native String exportTnz(String dir, String name);
 }

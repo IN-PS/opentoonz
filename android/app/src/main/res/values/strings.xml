@@ -14,11 +14,11 @@
     <string name="fps">Frames per second</string>
     <string name="no_projects">No projects yet. Tap + to create one.</string>
     <string name="delete_confirm">Delete project \"%1$s\"? This cannot be undone.</string>
-    <string name="brush">Brush</string>
-    <string name="eraser">Eraser</string>
-    <string name="fill">Fill</string>
-    <string name="select">Selection</string>
-    <string name="picker">Style picker</string>
+    <string name="brush">Brush Tool</string>
+    <string name="eraser">Eraser Tool</string>
+    <string name="fill">Fill Tool</string>
+    <string name="select">Selection Tool</string>
+    <string name="picker">Style Picker Tool</string>
     <string name="onion">Onion skin</string>
     <string name="play">Play</string>
     <string name="layers">Layers</string>
@@ -69,8 +69,8 @@
     <string name="value">Brightness</string>
     <string name="stylus_mode">Stylus detected: fingers now pan/zoom only</string>
     <string name="about_text">OpenToonz Mobile — engine built from the OpenToonz C++ core (tnzcore, toonzlib, TLV codec).\nMemory in use: %1$d MB\nCanvas: %2$d×%3$d @ %4$d fps</string>
-    <string name="shape">Shapes</string>
-    <string name="transform">Animate (keyframes)</string>
+    <string name="shape">Geometric Tool</string>
+    <string name="transform">Animate Tool</string>
     <string name="line">Line</string>
     <string name="rectangle">Rectangle</string>
     <string name="ellipse">Ellipse</string>
@@ -126,4 +126,13 @@
     <string name="mypaint_button">Brush: %1$s</string>
     <string name="mypaint_size">MyPaint size</string>
     <string name="mypaint_invalid">This brush could not be loaded</string>
+    <string name="skeleton">Skeleton Tool</string>
+    <string name="room_drawing">Drawing</string>
+    <string name="room_animation">Animation</string>
+    <string name="room_xsheet">Xsheet</string>
+    <string name="level_palette">Level Palette</string>
+    <string name="ik_all">Whole chain</string>
+    <string name="ik_hint">Drag a part of the current column: its parents rotate to follow (IK)</string>
+    <string name="export_tnz">Export OpenToonz scene (.tnz)</string>
+    <string name="export_notes">Exported. Notes:</string>
 </resources>
