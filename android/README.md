@@ -5,9 +5,9 @@ OpenToonz (tnzcore, toonzlib, codec TLV) é compilado sem fork; a interface de
 desktop Qt é substituída por uma interface touch nativa.
 
 **Estado:** motor nativo testado no host (233/233 verificações); app
-testado na JVM com Robolectric (14/14, `hosttest/run-tests.sh`); APKs v0.4.0
+testado na JVM com Robolectric (14/14, `hosttest/run-tests.sh`); APKs v0.4.1
 debug e release para arm64-v8a (NDK oficial r27c, pincéis MyPaint) em
-[`releases/v0.4.0/`](releases/v0.4.0/) e
+[`releases/v0.4.1/`](releases/v0.4.1/) e
 nos GitHub Releases. **Ainda não testados num aparelho** —
 ver `docs/RELATORIO.md` §4.
 
